@@ -14,6 +14,19 @@ class ToolError(Exception):
     """Fehler, der als verständliche Meldung an die KI zurückgegeben wird."""
 
 
+class ToolResult(str):
+    """Werkzeug-Ergebnis (Text für die KI) mit optionaler Datei bzw. URL für die Oberfläche."""
+
+    file: Path | None
+    url: str | None
+    action: str | None
+
+    def __new__(cls, text: str, file: Path | None = None, url: str | None = None, action: str | None = None):
+        obj = super().__new__(cls, text)
+        obj.file, obj.url, obj.action = file, url, action
+        return obj
+
+
 def safe_path(output_dir: Path, filename: str, default_suffix: str | None = None) -> Path:
     """Löst einen Dateinamen innerhalb des Ausgabeordners auf.
 
@@ -58,7 +71,7 @@ def create_file(output_dir: Path, filename: str, content: str, overwrite: bool =
     if not overwrite:
         path = unique(path)
     path.write_text(content, encoding="utf-8")
-    return f"Datei gespeichert: {path}"
+    return ToolResult(f"Datei gespeichert: {path}", file=path)
 
 
 def read_file(output_dir: Path, path: str) -> str:
@@ -113,8 +126,13 @@ def list_files(output_dir: Path, folder: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def open_path(output_dir: Path, path: str) -> str:
+def open_path(output_dir: Path, path: str, client_side: bool = False) -> str:
     p = _resolve_existing(output_dir, path)
+    if client_side:
+        # Web-Modus: Der Browser öffnet bzw. lädt die Datei.
+        if not p.is_file() or not p.is_relative_to(output_dir.resolve()):
+            raise ToolError("Im Web-Modus können nur Dateien aus dem JARVIS-Ordner geöffnet werden.")
+        return ToolResult(f"Datei wird im Browser bereitgestellt: {p.name}", file=p, action="open")
     if sys.platform.startswith("win"):
         os.startfile(str(p))  # type: ignore[attr-defined]
     elif sys.platform == "darwin":

@@ -1,0 +1,10 @@
+# Grundpaket (reicht für die Weboberfläche)
+anthropic>=2.8.0
+elevenlabs>=2.0.0
+python-pptx>=1.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+rich>=13.0
+python-dotenv>=1.0
+fastapi>=0.110
+uvicorn>=0.29

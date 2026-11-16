@@ -5,7 +5,7 @@ Ein Sprachassistent wie bei Iron Man: Du redest mit JARVIS, und er antwortet mit
 - **Gehirn:** Claude (Anthropic API, Modell `claude-opus-5-5`)
 - **Stimme:** ElevenLabs. JARVIS fängt schon mit dem ersten Satz an zu sprechen, während der Rest der Antwort noch entsteht.
 - **Ohren:** Mikrofon mit deutscher Spracherkennung
-- **Oberfläche:** Terminal im Iron-Man-Look
+- **Oberfläche:** Als **Webseite** im Browser (mit animiertem Arc Reactor) oder im Terminal
 
 ---
 
@@ -22,8 +22,13 @@ Wichtig: Beim Installieren das Häkchen **„Add Python to PATH“** setzen.
 | **ElevenLabs** (empfohlen) | Die realistische Stimme | <https://elevenlabs.io> → Profil unten links → *API Keys* |
 
 ### 3. JARVIS starten
-Doppelklick auf **`start.bat`**.
-Beim ersten Start wird alles automatisch installiert, danach öffnet sich die Datei `.env` im Editor. Trage dort deine Keys ein:
+**Als Webseite (empfohlen):** Doppelklick auf **`start-web.bat`**. Der Browser öffnet sich automatisch unter <http://localhost:8000>.
+Für das Mikrofon **Google Chrome oder Microsoft Edge** benutzen. Beim ersten Klick auf das Mikrofon musst du den Zugriff erlauben.
+
+**Im Terminal:** Doppelklick auf **`start.bat`**.
+
+Beim ersten Start wird alles automatisch installiert, danach öffnet sich die Datei `.env` im Editor.
+Trage dort deine Keys ein:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
@@ -35,7 +40,20 @@ Speichern, Editor schließen, und JARVIS fährt hoch.
 
 ---
 
-## Bedienung
+## Bedienung der Webseite
+
+| Aktion | So geht's |
+|---|---|
+| Sprechen | Auf das **Mikrofon** oder den **Arc Reactor** klicken (oder Leertaste), dann reden |
+| Tippen | Text eingeben und Enter drücken |
+| Freihändig reden | Schalter **Gesprächsmodus** einschalten: JARVIS hört nach jeder Antwort automatisch wieder zu |
+| Unterbrechen | Auf den Arc Reactor klicken oder Esc drücken |
+| Dateien | Erscheinen im Chat mit **Download**-Knopf, alle Dateien über das Ordner-Symbol oben rechts |
+| Neues Gespräch | Pfeil-Symbol oben rechts |
+
+**Vom Handy im WLAN:** In `.env` ein Passwort setzen (`JARVIS_WEB_PASSWORD=...`) und `start-web.bat --lan` starten. Dann am Handy `http://<IP-deines-PCs>:8000` öffnen. Die IP findest du mit `ipconfig`. Tippen und Sprachausgabe funktionieren dort. Das Mikrofon erlauben Handy-Browser nur über HTTPS, deshalb geht die Spracheingabe am Handy über die Diktier-Taste der Tastatur.
+
+## Bedienung im Terminal
 
 | Aktion | So geht's |
 |---|---|
@@ -73,6 +91,8 @@ Ohne ElevenLabs-Key benutzt JARVIS automatisch die Windows-Systemstimme.
 - **„Kein Mikrofon“:** In Windows unter *Einstellungen → Datenschutz → Mikrofon* den Zugriff für Desktop-Apps erlauben. Falls `PyAudio` sich nicht installieren lässt: `.venv\Scripts\pip install pipwin && .venv\Scripts\pipwin install pyaudio`.
 - **„Zugangsschlüssel wird abgelehnt“:** Den Anthropic-Key in `.env` prüfen und ob auf dem Konto Guthaben ist.
 - **ElevenLabs-Fehler (401/quota):** Key prüfen oder Kontingent aufgebraucht. Im kostenlosen Tarif sind die Zeichen pro Monat begrenzt.
+- **Webseite: kein Ton:** Einmal irgendwo auf die Seite klicken. Browser spielen Ton erst nach einer Interaktion ab. Prüfe außerdem den Schalter „Stimme“.
+- **Webseite: Mikrofon geht nicht:** Chrome oder Edge verwenden (Firefox unterstützt keine Spracheingabe) und den Zugriff über das Schloss-Symbol in der Adressleiste erlauben.
 - **Neu installieren:** Ordner `.venv` löschen und `start.bat` erneut starten.
 
 ## Für Entwickler
@@ -83,6 +103,8 @@ jarvis/
   voice.py      ElevenLabs-Stimme, satzweise gestreamt
   ears.py       Spracherkennung
   hud.py        Terminal-Oberfläche
+  web.py        Webserver (FastAPI) für die Weboberfläche
+  static/       Webseite (HTML, CSS, JavaScript)
   persona.py    Persönlichkeit (System-Prompt)
   tools/        Dateien, PowerPoint, Word, Excel, Webseiten
 ```

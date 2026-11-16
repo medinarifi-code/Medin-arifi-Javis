@@ -3,32 +3,40 @@
 from __future__ import annotations
 
 import json
-from typing import Callable
+from typing import Any, Callable
 
 import anthropic
 
 from .config import Config
 from .persona import system_prompt
-from .tools import TOOL_DEFINITIONS, ToolError, describe_call, execute_tool, validate
+from .tools import TOOL_DEFINITIONS, ToolError, ToolResult, describe_call, execute_tool, validate
 
 OnText = Callable[[str], None]
 OnStatus = Callable[[str], None]
+OnEvent = Callable[[dict[str, Any]], None]
 
 MAX_STEPS = 25  # Sicherheitsgrenze für Werkzeug-Runden pro Anfrage
 
 
 class Brain:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, web: bool = False):
         self.cfg = cfg
+        self.web = web  # Web-Modus: Dateien/Webseiten öffnet der Browser
         self.client = anthropic.Anthropic(api_key=cfg.anthropic_api_key) if cfg.anthropic_api_key else anthropic.Anthropic()
-        self.system = system_prompt(cfg)
+        self.system = system_prompt(cfg, web=web)
         self.messages: list[dict] = []
+        self._on_event: OnEvent | None = None
 
     def reset(self) -> None:
         self.messages.clear()
 
-    def ask(self, user_text: str, on_text: OnText, on_status: OnStatus) -> None:
-        """Schickt eine Nutzeranfrage ab. Text wird live über on_text gestreamt."""
+    def ask(self, user_text: str, on_text: OnText, on_status: OnStatus, on_event: OnEvent | None = None) -> None:
+        """Schickt eine Nutzeranfrage ab. Text wird live über on_text gestreamt.
+
+        on_event erhält {"type": "file"|"open", ...}, wenn ein Werkzeug eine Datei erstellt
+        oder etwas geöffnet werden soll (für die Weboberfläche).
+        """
+        self._on_event = on_event
         checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": user_text})
         try:
@@ -126,7 +134,13 @@ class Brain:
                     "content": f"Ungültige Eingabe ({error}): {json.dumps(args, ensure_ascii=False)[:500]}"}
         on_status(describe_call(block.name, args))
         try:
-            result = execute_tool(block.name, args, self.cfg.output_dir)
+            result = execute_tool(block.name, args, self.cfg.output_dir, client_side=self.web)
+            if self._on_event and isinstance(result, ToolResult):
+                if result.file is not None:
+                    self._on_event({"type": "file", "path": str(result.file), "name": result.file.name,
+                                    "action": result.action or "created"})
+                elif result.url:
+                    self._on_event({"type": "open", "url": result.url})
             return {"type": "tool_result", "tool_use_id": block.id, "content": result}
         except ToolError as e:
             return {"type": "tool_result", "tool_use_id": block.id, "is_error": True, "content": str(e)}

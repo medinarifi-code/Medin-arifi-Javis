@@ -13,8 +13,11 @@ def get_datetime() -> str:
     return f"{WOCHENTAGE[now.weekday()]}, {now:%d.%m.%Y}, {now:%H:%M} Uhr (Zeitzone {now.tzname()})"
 
 
-def open_website(url: str) -> str:
+def open_website(url: str, client_side: bool = False) -> str:
+    from .files import ToolResult
+
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    webbrowser.open(url)
-    return f"Webseite geöffnet: {url}"
+    if not client_side:
+        webbrowser.open(url)
+    return ToolResult(f"Webseite geöffnet: {url}", url=url, action="open")

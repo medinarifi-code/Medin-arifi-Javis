@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .files import ToolError, safe_path, unique
+from .files import ToolError, ToolResult, safe_path, unique
 
 # ---------------------------------------------------------------------------
 # PowerPoint im "Stark Industries"-HUD-Stil
@@ -173,7 +173,7 @@ def create_pptx(output_dir: Path, filename: str, title: str, slides: list[dict],
 
     path = unique(safe_path(output_dir, filename, ".pptx"))
     prs.save(str(path))
-    return f"Präsentation mit {len(slides) + 1} Folien gespeichert: {path}"
+    return ToolResult(f"Präsentation mit {len(slides) + 1} Folien gespeichert: {path}", file=path)
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ def create_docx(output_dir: Path, filename: str, title: str, sections: list[dict
             doc.add_paragraph(str(item), style="List Bullet")
     path = unique(safe_path(output_dir, filename, ".docx"))
     doc.save(str(path))
-    return f"Word-Dokument gespeichert: {path}"
+    return ToolResult(f"Word-Dokument gespeichert: {path}", file=path)
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ def create_xlsx(output_dir: Path, filename: str, sheets: list[dict]) -> str:
         ws.freeze_panes = "A2" if headers else None
     path = unique(safe_path(output_dir, filename, ".xlsx"))
     wb.save(str(path))
-    return f"Excel-Tabelle gespeichert: {path}"
+    return ToolResult(f"Excel-Tabelle gespeichert: {path}", file=path)
 
 
 def _cell(v):

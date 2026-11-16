@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import files, office, system
-from .files import ToolError
+from .files import ToolError, ToolResult
 
 # Server-Werkzeug: Anthropic führt die Websuche selbst aus.
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 5}
@@ -154,8 +154,11 @@ def validate(name: str, args: Any) -> str | None:
     return _check(args, schema, "input")
 
 
-def execute_tool(name: str, args: dict, output_dir: Path) -> str:
-    """Führt ein Werkzeug aus. Wirft ToolError bei erwartbaren Fehlern."""
+def execute_tool(name: str, args: dict, output_dir: Path, client_side: bool = False) -> str:
+    """Führt ein Werkzeug aus. Wirft ToolError bei erwartbaren Fehlern.
+
+    client_side=True (Web-Modus): Dateien/Webseiten öffnet der Browser statt des Servers.
+    """
     handlers: dict[str, Callable[[], str]] = {
         "create_file": lambda: files.create_file(output_dir, args["filename"], args["content"],
                                                  bool(args.get("overwrite", False))),
@@ -165,8 +168,8 @@ def execute_tool(name: str, args: dict, output_dir: Path) -> str:
         "create_xlsx": lambda: office.create_xlsx(output_dir, args["filename"], args["sheets"]),
         "read_file": lambda: files.read_file(output_dir, args["path"]),
         "list_files": lambda: files.list_files(output_dir, args.get("folder")),
-        "open_file": lambda: files.open_path(output_dir, args["path"]),
-        "open_website": lambda: system.open_website(args["url"]),
+        "open_file": lambda: files.open_path(output_dir, args["path"], client_side),
+        "open_website": lambda: system.open_website(args["url"], client_side),
         "get_datetime": system.get_datetime,
     }
     if name not in handlers:
@@ -185,4 +188,4 @@ def describe_call(name: str, args: dict) -> str:
     return f"{labels.get(name, name)} {detail}".strip()
 
 
-__all__ = ["TOOL_DEFINITIONS", "ToolError", "execute_tool", "validate", "describe_call"]
+__all__ = ["TOOL_DEFINITIONS", "ToolError", "ToolResult", "execute_tool", "validate", "describe_call"]
