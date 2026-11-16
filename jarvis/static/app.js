@@ -1,405 +1,215 @@
-/* J.A.R.V.I.S. – Weboberfläche
- * Mikrofon: Web Speech API (Chrome/Edge)
- * Stimme:   ElevenLabs über /api/tts (satzweise, sofortiges Abspielen) – sonst Browserstimme
- * Gehirn:   /api/chat (gestreamtes NDJSON)
- */
+/* JARVIS – Weboberfläche (Chat, Sprache, E-Mail) */
 (() => {
   "use strict";
-
-  const $ = (sel) => document.querySelector(sel);
-  const logEl = $("#log"), input = $("#input"), sendBtn = $("#send");
-  const stateLabel = $("#state-label"), interimEl = $("#interim");
-  const convToggle = $("#conv-mode"), voiceToggle = $("#voice-on");
-
-  // ---------- Hilfsfunktionen für Speicher (kann in privaten Fenstern fehlen) ----------
+  const $ = (s) => document.querySelector(s);
   const store = {
     get(k, d = null) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch { /* egal */ } },
+    set(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* egal */ } },
   };
-
   const newId = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+
+  let info = {};
+  let password = store.get("jarvis-key", "");
   let sessionId = store.get("jarvis-session") || newId();
   store.set("jarvis-session", sessionId);
-  let password = store.get("jarvis-key", "");
-
-  const authHeaders = () => (password ? { "X-Jarvis-Key": password } : {});
-  const withKey = (url) => (password ? url + (url.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(password) : url);
-
-  let status = { user_name: "Sir", voice: "browser", brain_ok: false };
   let busy = false;
 
-  // ---------- Zustand / Anzeige ----------
-  const STATES = { idle: "BEREIT", listening: "HÖRE ZU", thinking: "DENKE NACH", speaking: "SPRECHE" };
-  function setState(s) {
-    document.body.className = "state-" + s;
-    stateLabel.textContent = STATES[s];
+  const headers = (extra = {}) => {
+    const h = { ...extra };
+    if (password) h["X-Jarvis-Key"] = password;
+    const mt = store.get("jarvis-mail-token");
+    if (mt) h["X-Mail-Token"] = mt;
+    return h;
+  };
+  const withKey = (url) => (password ? `${url}${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(password)}` : url);
+
+  // ------------------------------------------------------------ Anzeige
+  const log = $("#log"), input = $("#input");
+  function setState(text, cls = "") {
+    $("#state").textContent = text;
+    document.body.className = cls;
   }
-  function refreshState() {
-    if (recog.active) setState("listening");
-    else if (busy) setState(voice.active ? "speaking" : "thinking");
-    else if (voice.active) setState("speaking");
-    else setState("idle");
+  function refresh() {
+    if (recog.active) setState("Hört zu …", "listening");
+    else if (busy) setState(voice.active ? "Spricht …" : "Denkt nach …", voice.active ? "speaking" : "thinking");
+    else if (voice.active) setState("Spricht …", "speaking");
+    else setState(mailState.connected ? `Bereit · ✉ ${mailState.address}` : "Bereit");
   }
+  const scroll = () => { log.scrollTop = log.scrollHeight; };
+  function hideWelcome() { $("#welcome")?.remove(); }
 
-  setInterval(() => {
-    const d = new Date();
-    $("#clock").textContent = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-  }, 1000);
-
-  function scrollDown() { logEl.scrollTop = logEl.scrollHeight; }
-
-  function addMessage(who, text, cls = "") {
+  function bubble(who, text, cls = "") {
+    hideWelcome();
     const el = document.createElement("div");
     el.className = `msg ${who} ${cls}`.trim();
-    const label = document.createElement("span");
-    label.className = "who";
-    label.textContent = who === "user" ? "DU" : "JARVIS";
-    const body = document.createElement("div");
-    body.className = "body";
-    body.textContent = text;
-    el.append(label, body);
-    logEl.append(el);
-    scrollDown();
+    el.textContent = text;
+    log.append(el); scroll();
     return el;
   }
-
-  function addStatus(text) {
+  function status(text) {
     const el = document.createElement("div");
-    el.className = "status-line";
-    el.textContent = text + " …";
-    logEl.append(el);
-    scrollDown();
+    el.className = "status";
+    el.textContent = "⟳ " + text + " …";
+    log.append(el); scroll();
   }
-
-  const TYPE_NAMES = { pptx: "PowerPoint-Präsentation", docx: "Word-Dokument", xlsx: "Excel-Tabelle", txt: "Textdatei",
-    md: "Markdown", py: "Python-Code", html: "Webseite", csv: "CSV-Tabelle", json: "JSON", js: "JavaScript" };
-
   function fileCard(name, url) {
-    const node = $("#file-card").content.firstElementChild.cloneNode(true);
     const ext = (name.split(".").pop() || "").toLowerCase();
-    const icon = node.querySelector(".file-icon");
-    icon.textContent = ext.toUpperCase().slice(0, 4);
-    icon.classList.add(ext);
-    node.querySelector(".file-name").textContent = name;
-    node.querySelector(".file-type").textContent = TYPE_NAMES[ext] || "Datei";
-    const a = node.querySelector(".file-dl");
-    a.href = withKey(url);
-    a.setAttribute("download", name);
-    return node;
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = '<div class="badge"></div><div class="meta"><div class="title"></div><div class="sub">Zum Herunterladen bereit</div></div><a>Laden</a>';
+    el.querySelector(".badge").textContent = ext.toUpperCase().slice(0, 4);
+    el.querySelector(".badge").classList.add(ext);
+    el.querySelector(".title").textContent = name;
+    const a = el.querySelector("a"); a.href = withKey(url); a.download = name;
+    log.append(el); scroll();
+  }
+  function mailCard(ev) {
+    const el = document.createElement("div");
+    el.className = "card mail-card";
+    el.innerHTML = '<div class="sent"></div><div class="title"></div><pre></pre>';
+    el.querySelector(".sent").textContent = "✓ Gesendet an " + ev.to;
+    el.querySelector(".title").textContent = ev.subject || "";
+    el.querySelector("pre").textContent = ev.text || "";
+    log.append(el); scroll();
   }
 
-  function downloadNow(url, name) {
-    const a = document.createElement("a");
-    a.href = withKey(url);
-    a.download = name;
-    document.body.append(a);
-    a.click();
-    a.remove();
+  // ------------------------------------------------------------ Stimme (kostenlose Browserstimme)
+  function clean(t) {
+    return t.replace(/```[\s\S]*?```/g, " ").replace(/https?:\/\/\S+/g, "").replace(/[*_#`>|]+/g, "")
+      .replace(/^\s*[-•]\s+/gm, "").replace(/\s+/g, " ").trim();
   }
-
-  // ---------- Text fürs Vorlesen ----------
-  function cleanForSpeech(t) {
-    return t.replace(/```[\s\S]*?```/g, " ")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      .replace(/https?:\/\/\S+/g, "")
-      .replace(/[*_#`>|]+/g, "")
-      .replace(/^\s*[-•▸]\s+/gm, "")
-      .replace(/\s+/g, " ").trim();
-  }
-
-  class SentenceBuffer {
-    constructor(minLen = 25) { this.buf = ""; this.minLen = minLen; }
+  class Sentences {
+    constructor() { this.buf = ""; }
     feed(chunk) {
       this.buf += chunk;
-      const out = [];
-      const re = /([.!?…:;])\s+|\n+/g;
+      const out = [], re = /([.!?…:;])\s+|\n+/g;
       let start = 0, m;
-      while ((m = re.exec(this.buf)) !== null) {
-        const end = m.index + (m[1] ? 1 : 0);
-        const piece = this.buf.slice(start, end).trim();
-        if (piece.length >= this.minLen) { out.push(piece); start = re.lastIndex; }
+      while ((m = re.exec(this.buf))) {
+        const piece = this.buf.slice(start, m.index + (m[1] ? 1 : 0)).trim();
+        if (piece.length >= 20) { out.push(piece); start = re.lastIndex; }
       }
       this.buf = this.buf.slice(start);
       return out;
     }
     flush() { const r = this.buf.trim(); this.buf = ""; return r ? [r] : []; }
   }
-
-  // ---------- Stimme ----------
-  // ElevenLabs-Audio wird satzweise geladen, dekodiert und über Web Audio abgespielt.
-  // Das funktioniert auch auf dem iPhone, sobald der Ton einmal per Fingertipp freigeschaltet wurde.
   const voice = {
-    queue: [],          // [{text, prev, buffer: Promise<AudioBuffer|null>}]
-    current: null,
-    active: false,
-    lastText: "",
-    ctx: null, analyser: null, levelRaf: 0,
-    browserVoice: null,
-
-    enabled() { return voiceToggle.checked; },
-    useEleven() { return status.voice === "elevenlabs" && this.ctx && this.ctx.state === "running"; },
-
+    active: false, pending: 0, chosen: null, raf: 0,
+    on() { return $("#btn-voice").getAttribute("aria-pressed") === "true"; },
+    pick() {
+      if (this.chosen || !("speechSynthesis" in window)) return this.chosen;
+      const de = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("de"));
+      this.chosen = de.find((v) => /natural|neural|online|premium|enhanced|siri/i.test(v.name)) || de[0] || null;
+      return this.chosen;
+    },
+    unlock() { // iPhone: Sprachausgabe muss einmal durch Antippen freigeschaltet werden
+      if (this.unlocked || !("speechSynthesis" in window)) return;
+      this.unlocked = true;
+      try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch { /* egal */ }
+    },
     say(text) {
-      text = cleanForSpeech(text);
-      if (!text || !this.enabled()) return;
-      this.queue.push({ text, prev: this.lastText });
-      this.lastText = text;
-      this.prefetch();
-      this.pump();
-    },
-
-    prefetch() {
-      // Den laufenden und die nächsten zwei Sätze parallel vorbereiten -> keine Pausen zwischen Sätzen.
-      for (const item of this.queue.slice(0, 2)) this.prepare(item);
-    },
-
-    prepare(item) {
-      if (item.buffer || !this.useEleven()) return;
-      const url = withKey(`/api/tts?text=${encodeURIComponent(item.text)}&prev=${encodeURIComponent(item.prev.slice(-300))}`);
-      item.buffer = fetch(url)
-        .then((r) => (r.ok ? r.arrayBuffer() : null))
-        .then((ab) => (ab ? new Promise((res, rej) => this.ctx.decodeAudioData(ab, res, rej)) : null))
-        .catch(() => null);
-    },
-
-    pump() {
-      if (this.current) return;
-      if (!this.queue.length) { this.finished(); return; }
-      this.active = true;
-      refreshState();
-      const item = this.queue.shift();
-      this.current = item;
-      this.prepare(item);
-      this.prefetch();
-      const done = () => { if (this.current === item) { this.current = null; this.pump(); } };
-
-      if (!item.buffer) { this.speakBrowser(item.text, done); return; }
-      item.buffer.then((buf) => {
-        if (this.current !== item) return;               // inzwischen gestoppt
-        if (!buf) { this.speakBrowser(item.text, done); return; }
-        const src = this.ctx.createBufferSource();
-        src.buffer = buf;
-        src.connect(this.analyser);
-        src.onended = done;
-        item.source = src;
-        src.start();
-        this.trackLevel();
-      });
-    },
-
-    speakBrowser(text, done) {
-      if (!("speechSynthesis" in window)) { done(); return; }
+      text = clean(text);
+      if (!text || !this.on() || !("speechSynthesis" in window)) return;
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = status.language || "de-DE";
-      if (!this.browserVoice) {
-        const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("de"));
-        this.browserVoice = voices.find((v) => /natural|online|neural|premium|enhanced/i.test(v.name)) || voices[0] || null;
-      }
-      if (this.browserVoice) u.voice = this.browserVoice;
-      u.rate = 1.05;
-      u.onend = done; u.onerror = done;
-      this.fakeLevel(true);
+      u.lang = "de-DE"; u.rate = 1.05;
+      const v = this.pick(); if (v) u.voice = v;
+      const end = () => { this.pending = Math.max(0, this.pending - 1); if (!this.pending) this.done(); };
+      u.onend = end; u.onerror = end;
+      this.pending++;
+      if (!this.active) { this.active = true; this.animate(); refresh(); }
       speechSynthesis.speak(u);
     },
-
-    unlock() {
-      // Muss innerhalb einer Nutzeraktion (Klick/Tippen) passieren, sonst bleibt der Ton stumm.
-      try {
-        if (navigator.audioSession) navigator.audioSession.type = "playback"; // iPhone: auch bei Stummschalter hörbar
-        if (!this.ctx) {
-          this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-          this.analyser = this.ctx.createAnalyser();
-          this.analyser.fftSize = 256;
-          this.analyser.connect(this.ctx.destination);
-          // kurzer stiller Ton schaltet Audio auf iOS frei
-          const b = this.ctx.createBuffer(1, 1, 22050);
-          const s = this.ctx.createBufferSource();
-          s.buffer = b; s.connect(this.ctx.destination); s.start(0);
-        }
-        if (this.ctx.state !== "running") this.ctx.resume();
-      } catch { /* dann eben Browserstimme */ }
-    },
-
-    trackLevel() {
-      cancelAnimationFrame(this.levelRaf);
-      const data = new Uint8Array(this.analyser.frequencyBinCount);
-      const tick = () => {
-        this.analyser.getByteFrequencyData(data);
-        let sum = 0; for (const v of data) sum += v;
-        setLevel(Math.min(1, (sum / data.length) / 90));
-        if (this.active) this.levelRaf = requestAnimationFrame(tick);
-        else setLevel(0);
-      };
-      tick();
-    },
-
-    fakeLevel(on) {
-      cancelAnimationFrame(this.levelRaf);
-      if (!on) { setLevel(0); return; }
+    animate() {
       const tick = (t) => {
-        setLevel(0.35 + 0.3 * Math.abs(Math.sin(t / 140)));
-        if (this.active) this.levelRaf = requestAnimationFrame(tick); else setLevel(0);
+        document.documentElement.style.setProperty("--level", this.active ? (0.3 + 0.3 * Math.abs(Math.sin(t / 150))).toFixed(2) : "0");
+        if (this.active) this.raf = requestAnimationFrame(tick);
       };
-      this.levelRaf = requestAnimationFrame(tick);
+      this.raf = requestAnimationFrame(tick);
     },
-
-    stop() {
-      this.queue = [];
-      const cur = this.current;
-      this.current = null;
-      if (cur && cur.source) { cur.source.onended = null; try { cur.source.stop(); } catch { /* schon zu Ende */ } }
-      if ("speechSynthesis" in window) speechSynthesis.cancel();
-      this.lastText = "";
-      this.finished();
-    },
-
-    finished() {
+    stop() { if ("speechSynthesis" in window) speechSynthesis.cancel(); this.pending = 0; this.done(); },
+    done() {
       if (!this.active) return;
       this.active = false;
-      setLevel(0);
-      refreshState();
-      maybeListenAgain();
+      document.documentElement.style.setProperty("--level", "0");
+      refresh(); listenAgain();
     },
   };
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => { voice.chosen = null; };
 
-  function setLevel(v) { document.documentElement.style.setProperty("--level", v.toFixed(3)); }
-
-  // ---------- Mikrofon ----------
+  // ------------------------------------------------------------ Mikrofon
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const recog = {
-    r: null, active: false, finalText: "",
-    supported: !!SR,
+    active: false, r: null, text: "",
     start() {
-      if (!this.supported) {
-        addMessage("jarvis", "Ihr Browser unterstützt leider keine Spracheingabe. Bitte verwenden Sie Google Chrome oder Microsoft Edge – tippen funktioniert natürlich trotzdem.", "error");
-        return;
-      }
-      if (this.active) return;
+      if (!SR) { bubble("jarvis", "Spracheingabe geht in diesem Browser nicht. Bitte Safari, Chrome oder Edge verwenden – oder einfach tippen.", "error"); return; }
+      if (this.active || busy) return;
       voice.stop();
       const r = new SR();
-      r.lang = status.language || "de-DE";
-      r.interimResults = true;
-      r.continuous = false;
-      r.maxAlternatives = 1;
-      this.finalText = "";
+      r.lang = "de-DE"; r.interimResults = true; r.continuous = false;
+      this.text = "";
       r.onresult = (e) => {
         let interim = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
-          const res = e.results[i];
-          if (res.isFinal) this.finalText += res[0].transcript;
-          else interim += res[0].transcript;
+          if (e.results[i].isFinal) this.text += e.results[i][0].transcript;
+          else interim += e.results[i][0].transcript;
         }
-        interimEl.textContent = (this.finalText + " " + interim).trim();
+        $("#interim").textContent = (this.text + " " + interim).trim();
       };
       r.onerror = (e) => {
         if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-          addMessage("jarvis", "Ich habe keinen Zugriff auf das Mikrofon. Bitte erlauben Sie den Zugriff über das Schloss-Symbol in der Adressleiste.", "error");
-          convToggle.checked = false;
+          bubble("jarvis", "Kein Zugriff aufs Mikrofon. Bitte in den Browser-Einstellungen erlauben.", "error");
+          setConv(false);
         }
       };
       r.onend = () => {
-        this.active = false;
-        this.r = null;
-        interimEl.textContent = "";
-        const text = this.finalText.trim();
-        refreshState();
-        if (text) send(text);
-        else maybeListenAgain();
+        this.active = false; this.r = null; $("#interim").textContent = "";
+        const t = this.text.trim(); refresh();
+        if (t) send(t); else listenAgain();
       };
-      this.r = r;
-      this.active = true;
-      refreshState();
-      try { r.start(); } catch { this.active = false; refreshState(); }
+      this.r = r; this.active = true; refresh();
+      try { r.start(); } catch { this.active = false; refresh(); }
     },
-    stop() { if (this.r) this.r.stop(); },
-    abort() { if (this.r) { this.finalText = ""; this.r.abort(); } },
+    stop() { this.r?.stop(); },
+    abort() { if (this.r) { this.text = ""; this.r.abort(); } },
   };
-
-  function maybeListenAgain() {
-    if (convToggle.checked && !busy && !voice.active && !recog.active) {
-      setTimeout(() => { if (convToggle.checked && !busy && !voice.active && !recog.active) recog.start(); }, 350);
-    }
+  const convOn = () => $("#btn-conv").getAttribute("aria-pressed") === "true";
+  function setConv(on) { $("#btn-conv").setAttribute("aria-pressed", String(on)); store.set("jarvis-conv", on ? "1" : "0"); }
+  function listenAgain() {
+    if (convOn() && !busy && !voice.active && !recog.active) setTimeout(() => { if (convOn() && !busy && !voice.active && !recog.active) recog.start(); }, 400);
   }
 
-  function toggleListening() {
-    if (recog.active) { recog.stop(); return; }
-    if (busy) return;
-    if (voice.active) voice.stop();
-    recog.start();
-  }
-
-  // ---------- Gespräch ----------
+  // ------------------------------------------------------------ Chat
   async function send(text) {
-    text = text.trim();
+    text = (text || "").trim();
     if (!text || busy) return;
-    if (/^(neues gespräch|reset|vergiss alles)[.!]?$/i.test(text)) { resetConversation(); return; }
-
-    busy = true;
-    sendBtn.disabled = true;
+    busy = true; $("#send").disabled = true;
     voice.stop();
-    addMessage("user", text);
-    refreshState();
-
-    let msgEl = null, body = null;
-    const sentences = new SentenceBuffer();
-    const ensureMsg = () => {
-      if (!msgEl) { msgEl = addMessage("jarvis", "", "streaming"); body = msgEl.querySelector(".body"); }
-    };
-    const closeMsg = () => {
-      if (msgEl) msgEl.classList.remove("streaming");
-      msgEl = null; body = null;
-    };
+    bubble("user", text);
+    refresh();
+    let el = null;
+    const sentences = new Sentences();
+    const close = () => { el?.classList.remove("streaming"); el = null; };
 
     const handle = (ev) => {
-      switch (ev.type) {
-        case "text":
-          ensureMsg();
-          body.textContent += ev.text;
-          scrollDown();
-          for (const s of sentences.feed(ev.text)) voice.say(s);
-          break;
-        case "status":
-          closeMsg();
-          addStatus(ev.text);
-          break;
-        case "file": {
-          closeMsg();
-          const card = fileCard(ev.name, ev.url);
-          logEl.append(card);
-          scrollDown();
-          if (ev.action === "open") downloadNow(ev.url, ev.name);
-          break;
-        }
-        case "open": {
-          closeMsg();
-          const w = window.open(ev.url, "_blank", "noopener");
-          if (!w) {
-            const div = document.createElement("div");
-            div.className = "status-line link-card";
-            div.innerHTML = 'Webseite öffnen: <a target="_blank" rel="noopener"></a>';
-            const a = div.querySelector("a"); a.href = ev.url; a.textContent = ev.url;
-            logEl.append(div); scrollDown();
-          }
-          break;
-        }
-        case "error":
-          closeMsg();
-          addMessage("jarvis", ev.text, "error");
-          break;
-      }
+      if (ev.type === "text") {
+        if (!el) el = bubble("jarvis", "", "streaming");
+        el.textContent += ev.text; scroll();
+        sentences.feed(ev.text).forEach((s) => voice.say(s));
+      } else if (ev.type === "status") { close(); status(ev.text); }
+      else if (ev.type === "file") { close(); fileCard(ev.name, ev.url); }
+      else if (ev.type === "mail_sent") { close(); mailCard(ev); }
+      else if (ev.type === "mail_token") { store.set("jarvis-mail-token", ev.token); }
+      else if (ev.type === "error") { close(); bubble("jarvis", ev.text, "error"); }
     };
 
     try {
       const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        method: "POST", headers: headers({ "Content-Type": "application/json" }),
         body: JSON.stringify({ session: sessionId, text }),
       });
-      if (res.status === 401) { await askPassword(); throw new Error("Bitte erneut senden."); }
-      if (!res.ok || !res.body) throw new Error(`Server antwortet mit Status ${res.status}`);
-
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
+      if (res.status === 401) { showLogin(); throw new Error("Bitte erneut anmelden."); }
+      if (!res.ok || !res.body) throw new Error("Server antwortet nicht (" + res.status + ")");
+      const reader = res.body.getReader(), dec = new TextDecoder();
       let buf = "";
       for (;;) {
         const { value, done } = await reader.read();
@@ -407,149 +217,150 @@
         buf += dec.decode(value, { stream: true });
         let nl;
         while ((nl = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
           if (line) { try { handle(JSON.parse(line)); } catch (e) { console.warn(e); } }
         }
       }
     } catch (e) {
-      closeMsg();
-      addMessage("jarvis", "Verbindung zum JARVIS-Server unterbrochen. " + (e.message || ""), "error");
+      close(); bubble("jarvis", "Verbindung unterbrochen. " + (e.message || ""), "error");
     } finally {
-      for (const s of sentences.flush()) voice.say(s);
-      closeMsg();
-      busy = false;
-      sendBtn.disabled = false;
-      refreshState();
-      if (!voice.active) maybeListenAgain();
-      loadFiles();
+      sentences.flush().forEach((s) => voice.say(s));
+      close(); busy = false; $("#send").disabled = false;
+      refresh(); if (!voice.active) listenAgain();
     }
   }
 
-  async function resetConversation() {
+  async function newChat() {
     voice.stop();
-    try {
-      await fetch("/api/reset", { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ session: sessionId }) });
-    } catch { /* neue Sitzung reicht */ }
-    sessionId = newId();
-    store.set("jarvis-session", sessionId);
-    logEl.innerHTML = "";
-    const t = "Gedächtnis gelöscht. Wir beginnen von vorn.";
-    addMessage("jarvis", t);
-    voice.say(t);
+    try { await fetch("/api/reset", { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ session: sessionId }) }); } catch { /* egal */ }
+    sessionId = newId(); store.set("jarvis-session", sessionId);
+    location.reload();
   }
 
-  async function askPassword() {
-    const p = window.prompt("JARVIS ist passwortgeschützt. Passwort:");
-    if (p) { password = p; store.set("jarvis-key", p); }
+  // ------------------------------------------------------------ E-Mail
+  let mailState = { connected: false };
+  let mailPoll = 0;
+  const dlg = $("#mail-dialog"), body = $("#mail-body");
+
+  async function loadMail() {
+    try {
+      const r = await fetch(`/api/mail/status?session=${encodeURIComponent(sessionId)}`, { headers: headers() });
+      if (!r.ok) return mailState;
+      mailState = await r.json();
+      if (mailState.token) store.set("jarvis-mail-token", mailState.token);
+    } catch { /* offline */ }
+    $("#mail-dot").classList.toggle("on", !!mailState.connected);
+    refresh();
+    return mailState;
   }
 
-  // ---------- Dateien ----------
-  async function loadFiles() {
-    try {
-      const res = await fetch("/api/files", { headers: authHeaders() });
-      if (!res.ok) return;
-      const files = await res.json();
-      const list = $("#files-list");
-      list.innerHTML = "";
-      if (!files.length) {
-        const p = document.createElement("div"); p.className = "files-empty";
-        p.textContent = "Noch keine Dateien. Bitten Sie JARVIS z. B. um eine Präsentation.";
-        list.append(p);
+  function renderMail() {
+    const s = mailState;
+    body.innerHTML = "";
+    const p = (html) => { const el = document.createElement("div"); el.innerHTML = html; body.append(el); return el; };
+    if (s.connected) {
+      const el = p('<p class="ok">✓ Verbunden</p><p></p><p>Frag einfach: „Habe ich neue Mails?“, „Lies mir die Mail von … vor“ oder „Antworte ihm, dass …“.</p>');
+      el.querySelectorAll("p")[1].textContent = s.address + (s.provider === "outlook" ? " (Outlook)" : "");
+      if (s.provider === "outlook") {
+        const row = p('<div class="row"><button class="secondary" id="mail-off">Trennen</button></div>');
+        row.querySelector("#mail-off").onclick = async () => {
+          await fetch("/api/mail/outlook/disconnect", { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ session: sessionId }) });
+          store.set("jarvis-mail-token", null); await loadMail(); renderMail();
+        };
       }
-      for (const f of files) list.append(fileCard(f.name, f.url));
-    } catch { /* still */ }
-  }
-
-  // ---------- Start ----------
-  function greeting() {
-    const h = new Date().getHours();
-    const g = h < 11 ? "Guten Morgen" : h < 18 ? "Guten Tag" : "Guten Abend";
-    return `${g}, ${status.user_name}. Alle Systeme sind online. Wie kann ich helfen?`;
-  }
-
-  function pill(id, ok, title) {
-    const el = $(id);
-    el.classList.add(ok ? "ok" : "warn");
-    el.title = title;
-  }
-
-  let greeted = false;
-  function greetOnce() {
-    if (greeted) return;
-    greeted = true;
-    voice.say(logEl.querySelector(".msg.jarvis .body")?.textContent || greeting());
-  }
-
-  async function init() {
-    try {
-      const res = await fetch("/api/status");
-      status = await res.json();
-    } catch { /* Standardwerte */ }
-    if (status.password_required && !password) await askPassword();
-
-    pill("#sys-brain", status.brain_ok, status.brain_ok ? `Gehirn: ${status.model}` : "API-Key fehlt");
-    pill("#sys-voice", status.voice === "elevenlabs", status.voice === "elevenlabs" ? "ElevenLabs" : "Browserstimme (kein ElevenLabs-Key)");
-    pill("#sys-mic", recog.supported, recog.supported ? "Spracheingabe verfügbar" : "Spracheingabe nur in Chrome/Edge");
-
-    convToggle.checked = store.get("jarvis-conv") === "1";
-    voiceToggle.checked = store.get("jarvis-voice", "1") === "1";
-
-    addMessage("jarvis", greeting());
-    if (!status.brain_ok) {
-      addMessage("jarvis", "Hinweis: Mir fehlt noch mein API-Key (kostenlos: GEMINI_API_KEY von aistudio.google.com). Bitte eintragen und mich neu starten.", "error");
+      return;
     }
-    loadFiles();
-    setState("idle");
+    if (s.pending) {
+      const el = p(`<p>1. Öffne <a target="_blank" rel="noopener"></a></p><p>2. Gib diesen Code ein:</p><div class="code"></div>
+        <p>3. Melde dich mit deinem Outlook/Hotmail-Konto an und tippe auf „Akzeptieren“.</p>
+        <div class="row"><button class="primary" id="copy-code">Code kopieren & Seite öffnen</button></div><p>Ich warte …</p>`);
+      const a = el.querySelector("a"); a.href = s.pending.verification_uri; a.textContent = s.pending.verification_uri.replace(/^https?:\/\//, "");
+      el.querySelector(".code").textContent = s.pending.user_code;
+      el.querySelector("#copy-code").onclick = () => {
+        navigator.clipboard?.writeText(s.pending.user_code).catch(() => {});
+        window.open(s.pending.verification_uri, "_blank", "noopener");
+      };
+      return;
+    }
+    if (s.error) p('<p class="error"></p>').querySelector("p").textContent = "Anmeldung fehlgeschlagen: " + s.error;
+    if (s.outlook_available) {
+      const el = p('<p>Verbinde dein Outlook-/Hotmail-Postfach. Dein Passwort gibst du nur bei Microsoft ein.</p><div class="row"><button class="primary" id="ol-start">Outlook verbinden</button></div>');
+      el.querySelector("#ol-start").onclick = async (e) => {
+        e.target.disabled = true; e.target.textContent = "Starte …";
+        const r = await fetch("/api/mail/outlook/start", { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ session: sessionId }) });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); mailState.error = j.detail || "Fehler " + r.status; renderMail(); return; }
+        await loadMail(); renderMail(); startPolling();
+      };
+    } else {
+      p(`<p>Noch kein Postfach eingerichtet. So geht's (bei Render → <b>Environment</b>):</p>
+        <ul class="steps"><li><b>Outlook/Hotmail:</b> <code>MS_CLIENT_ID</code> eintragen (Anleitung im README).</li>
+        <li><b>Gmail/GMX/Web.de:</b> <code>MAIL_ADDRESS</code> und <code>MAIL_APP_PASSWORD</code> eintragen.</li></ul>`);
+    }
+  }
+
+  function startPolling() {
+    clearInterval(mailPoll);
+    mailPoll = setInterval(async () => {
+      await loadMail();
+      if (dlg.open) renderMail();
+      if (mailState.connected || !mailState.pending) clearInterval(mailPoll);
+    }, 3000);
+  }
+
+  // ------------------------------------------------------------ Anmeldung & Start
+  function showLogin() { $("#app").hidden = true; $("#login").hidden = false; $("#login-pw").focus(); }
+  async function showApp() {
+    $("#login").hidden = true; $("#app").hidden = false;
+    $("#hello").textContent = `Hallo ${info.user_name || ""}, wie kann ich helfen?`.replace(" ,", ",");
+    if (!info.ai_ready) bubble("jarvis", "Mir fehlt noch der kostenlose GEMINI_API_KEY. Bitte bei Render unter Environment eintragen.", "error");
+    $("#btn-voice").setAttribute("aria-pressed", store.get("jarvis-voice", "1") === "1" ? "true" : "false");
+    setConv(store.get("jarvis-conv") === "1");
+    await loadMail();
+    if (mailState.pending) startPolling();
     input.focus();
   }
 
-  // Browser erlauben Ton erst nach einer Interaktion -> Begrüßung beim ersten Klick/Tastendruck sprechen.
-  ["pointerdown", "keydown", "touchend", "click"].forEach((evt) =>
-    window.addEventListener(evt, () => voice.unlock(), { capture: true }));
-  window.addEventListener("pointerdown", (e) => {
-    // Begrüßung nur sprechen, wenn der erste Klick nicht schon Mikrofon/Eingabe startet
-    if (!e.target.closest("#mic, #reactor, #composer, .toggle")) greetOnce(); else greeted = true;
-  }, { once: true, capture: true });
-
-  // ---------- Ereignisse ----------
-  $("#composer").addEventListener("submit", (e) => {
+  $("#login-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    greeted = true;
-    const t = input.value;
-    input.value = "";
-    autoGrow();
-    send(t);
+    const pw = $("#login-pw").value;
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+    if (r.ok) { password = pw; store.set("jarvis-key", pw); $("#login-error").hidden = true; showApp(); }
+    else { $("#login-error").hidden = false; }
   });
+
+  async function init() {
+    try { info = await (await fetch("/api/info")).json(); } catch { info = {}; }
+    if (info.needs_password) {
+      if (!password) return showLogin();
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
+      if (!r.ok) return showLogin();
+    }
+    showApp();
+  }
+
+  // ------------------------------------------------------------ Ereignisse
+  ["pointerdown", "touchend", "keydown"].forEach((ev) => window.addEventListener(ev, () => voice.unlock(), { capture: true }));
+  $("#composer").addEventListener("submit", (e) => { e.preventDefault(); const t = input.value; input.value = ""; grow(); send(t); });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#composer").requestSubmit(); }
     if (e.key === "Escape") voice.stop();
   });
-  function autoGrow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 160) + "px"; }
-  input.addEventListener("input", autoGrow);
-
-  $("#mic").addEventListener("click", () => { greeted = true; toggleListening(); });
-  $("#reactor").addEventListener("click", () => { greeted = true; voice.active ? voice.stop() : toggleListening(); });
-  $("#btn-reset").addEventListener("click", resetConversation);
-  $("#btn-files").addEventListener("click", () => { $("#files-panel").hidden = !$("#files-panel").hidden; loadFiles(); });
-  $("#files-close").addEventListener("click", () => { $("#files-panel").hidden = true; });
-
-  convToggle.addEventListener("change", () => {
-    store.set("jarvis-conv", convToggle.checked ? "1" : "0");
-    if (convToggle.checked) { greeted = true; maybeListenAgain(); } else recog.abort();
+  const grow = () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; };
+  input.addEventListener("input", grow);
+  $("#mic").addEventListener("click", () => (recog.active ? recog.stop() : voice.active ? voice.stop() : recog.start()));
+  $("#btn-voice").addEventListener("click", (e) => {
+    const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+    e.currentTarget.setAttribute("aria-pressed", String(on)); store.set("jarvis-voice", on ? "1" : "0");
+    if (!on) voice.stop();
   });
-  voiceToggle.addEventListener("change", () => {
-    store.set("jarvis-voice", voiceToggle.checked ? "1" : "0");
-    if (!voiceToggle.checked) voice.stop();
-  });
-
-  // Leertaste (außerhalb des Textfelds) = Sprechen
-  window.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && document.activeElement === document.body && !e.repeat) { e.preventDefault(); greeted = true; toggleListening(); }
-  });
-
-  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => { voice.browserVoice = null; };
+  $("#btn-conv").addEventListener("click", () => { setConv(!convOn()); if (convOn()) listenAgain(); else recog.abort(); });
+  $("#btn-new").addEventListener("click", newChat);
+  $("#btn-mail").addEventListener("click", async () => { await loadMail(); renderMail(); dlg.showModal(); });
+  $("#mail-close").addEventListener("click", () => dlg.close());
+  document.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => {
+    const q = c.dataset.q;
+    if (q.endsWith(" ")) { input.value = q; input.focus(); grow(); } else send(q);
+  }));
 
   init();
 })();

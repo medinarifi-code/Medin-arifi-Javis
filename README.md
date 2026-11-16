@@ -1,139 +1,80 @@
-# J.A.R.V.I.S. – Dein persönlicher KI-Assistent
+# JARVIS – dein kostenloser KI-Assistent
 
-Ein Sprachassistent wie bei Iron Man: Du redest mit JARVIS, und er antwortet mit einer natürlichen Stimme. Er kann alles, was eine normale KI kann (Fragen beantworten, erklären, Texte schreiben, programmieren, übersetzen, im Internet suchen), und er kann **Dateien erstellen**: PowerPoint (.pptx), Word (.docx), Excel (.xlsx), Code, Textdateien und mehr.
+Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit Google Gemini:
 
-- **Gehirn:** **Google Gemini (kostenlos)** oder Claude von Anthropic (kostenpflichtig, sehr stark)
-- **Stimme:** ElevenLabs. JARVIS fängt schon mit dem ersten Satz an zu sprechen, während der Rest der Antwort noch entsteht.
-- **Ohren:** Mikrofon mit deutscher Spracherkennung
-- **Oberfläche:** Als **Webseite** im Browser (mit animiertem Arc Reactor) oder im Terminal
-
----
-
-## Einrichtung unter Windows (einmalig, ca. 5 Minuten)
-
-### 1. Python installieren
-Lade **Python 3.11 oder neuer** von <https://www.python.org/downloads/> herunter.
-Wichtig: Beim Installieren das Häkchen **„Add Python to PATH“** setzen.
-
-### 2. API-Keys besorgen
-| Dienst | Wofür | Wo |
-|---|---|---|
-| **Google Gemini** (kostenlos) | Das Gehirn | <https://aistudio.google.com> → *Get API key* → *Create API key* |
-| *oder* **Anthropic** (kostenpflichtig) | Das Gehirn (Claude) | <https://console.anthropic.com> → *API Keys* → *Create Key* (Guthaben aufladen nötig) |
-| **ElevenLabs** (empfohlen) | Die realistische Stimme | <https://elevenlabs.io> → Profil unten links → *API Keys* |
-
-### 3. JARVIS starten
-**Als Webseite (empfohlen):** Doppelklick auf **`start-web.bat`**. Der Browser öffnet sich automatisch unter <http://localhost:8000>.
-Für das Mikrofon **Google Chrome oder Microsoft Edge** benutzen. Beim ersten Klick auf das Mikrofon musst du den Zugriff erlauben.
-
-**Im Terminal:** Doppelklick auf **`start.bat`**.
-
-Beim ersten Start wird alles automatisch installiert, danach öffnet sich die Datei `.env` im Editor.
-Trage dort deine Keys ein:
-
-```
-GEMINI_API_KEY=AIza...
-ELEVENLABS_API_KEY=sk_...
-JARVIS_USER_NAME=Sir
-```
-
-Speichern, Editor schließen, und JARVIS fährt hoch.
+- 💬 Beantwortet Fragen, per Text oder Sprache (Mikrofon + Stimme)
+- ✉️ Liest deine **E-Mails** und **beantwortet** sie (Outlook/Hotmail oder Gmail/GMX/Web.de)
+- 📊 Erstellt **PowerPoint**, Word, Excel und andere Dateien zum Download
+- 🌐 Sucht aktuelle Infos im Internet (Nachrichten, Wetter …)
+- 📱 Läuft im Browser und als App auf dem iPhone
 
 ---
 
-## 🌐 Online stellen (eigener Link, auch fürs Handy)
+## 1. Kostenlosen Gemini-Key holen
+1. <https://aistudio.google.com> öffnen und mit dem Google-Konto anmelden
+2. **„Get API key“** → **„Create API key“**
+3. Key kopieren (beginnt mit `AIza…`)
 
-JARVIS läuft dann auf einem Server bei **Render** und ist über einen echten Link erreichbar, z. B. `https://jarvis-xxxx.onrender.com`. Dein PC muss dafür nicht an sein.
+## 2. Online stellen bei Render (kostenlos)
+1. <https://render.com> → **„Get Started“** → mit **GitHub** anmelden
+2. **„+ New“** → **„Blueprint“** → Repository **Medin-arifi-Javis** auswählen
+3. Felder ausfüllen:
+   | Feld | Inhalt |
+   |---|---|
+   | `GEMINI_API_KEY` | dein Key aus Schritt 1 |
+   | `JARVIS_WEB_PASSWORD` | ein Passwort, das du dir ausdenkst (schützt JARVIS und deine Mails) |
+   | `JARVIS_USER_NAME` | wie JARVIS dich nennt, z. B. `Medin` |
+   | `MS_CLIENT_ID` | für Outlook, siehe 3A (sonst leer lassen) |
+   | `MAIL_ADDRESS`, `MAIL_APP_PASSWORD` | für Gmail/GMX, siehe 3B (sonst leer lassen) |
+4. **„Deploy Blueprint“** und 3–5 Minuten warten. Oben steht dann dein Link (`https://jarvis-….onrender.com`).
+5. **iPhone-App:** Link in Safari öffnen → Teilen □↑ → **„Zum Home-Bildschirm“**
 
-1. Auf <https://render.com> ein kostenloses Konto erstellen: **„Sign up with GitHub“** wählen.
-2. Im Render-Dashboard oben rechts auf **„+ New“** → **„Blueprint“** tippen.
-3. Bei GitHub den Zugriff auf das Repository **Medin-arifi-Javis** erlauben und es auswählen.
-4. Render liest die Datei `render.yaml` und fragt nach diesen Werten:
-   - `GEMINI_API_KEY`: dein kostenloser Google-Key (von aistudio.google.com)
-   - `ANTHROPIC_API_KEY`: **leer lassen** (nur falls du Claude bezahlen möchtest)
-   - `ELEVENLABS_API_KEY`: dein ElevenLabs-Key (für die Stimme)
-   - `JARVIS_WEB_PASSWORD`: **ein Passwort, das du dir ausdenkst.** Damit kann niemand außer dir dein API-Guthaben verbrauchen.
-   - `JARVIS_USER_NAME`: wie JARVIS dich nennen soll, z. B. `Sir`
-5. **„Apply“** / **„Deploy Blueprint“** tippen und ca. 3–5 Minuten warten.
-6. Unter **Dashboard → jarvis** steht oben dein Link. Öffne ihn und gib dein Passwort ein. Fertig!
-
-**Als App auf dem iPhone:** Den Link in **Safari** öffnen → Teilen-Symbol □↑ → **„Zum Home-Bildschirm“**. JARVIS hat dann ein eigenes App-Symbol.
-
-Hinweise:
-- Im kostenlosen Tarif schläft der Server nach 15 Minuten ohne Benutzung ein. Der erste Aufruf danach dauert ca. 1 Minute.
-- Erstellte Dateien direkt herunterladen. Beim Neustart des Servers werden sie gelöscht.
-- Keys oder Passwort ändern: Render → jarvis → **Environment**.
-
-## Bedienung der Webseite
-
-| Aktion | So geht's |
-|---|---|
-| Sprechen | Auf das **Mikrofon** oder den **Arc Reactor** klicken (oder Leertaste), dann reden |
-| Tippen | Text eingeben und Enter drücken |
-| Freihändig reden | Schalter **Gesprächsmodus** einschalten: JARVIS hört nach jeder Antwort automatisch wieder zu |
-| Unterbrechen | Auf den Arc Reactor klicken oder Esc drücken |
-| Dateien | Erscheinen im Chat mit **Download**-Knopf, alle Dateien über das Ordner-Symbol oben rechts |
-| Neues Gespräch | Pfeil-Symbol oben rechts |
-
-**Vom Handy im WLAN:** In `.env` ein Passwort setzen (`JARVIS_WEB_PASSWORD=...`) und `start-web.bat --lan` starten. Dann am Handy `http://<IP-deines-PCs>:8000` öffnen. Die IP findest du mit `ipconfig`. Tippen und Sprachausgabe funktionieren dort. Das Mikrofon erlauben Handy-Browser nur über HTTPS, deshalb geht die Spracheingabe am Handy über die Diktier-Taste der Tastatur.
-
-## Bedienung im Terminal
-
-| Aktion | So geht's |
-|---|---|
-| Sprechen | **Enter** drücken, dann einfach reden |
-| Tippen | Text eingeben und Enter drücken |
-| Freihändig reden | `start.bat -c` (Gesprächsmodus: JARVIS hört nach jeder Antwort automatisch wieder zu) |
-| Unterbrechen | Beliebige Taste drücken, während JARVIS spricht |
-| Gedächtnis löschen | „neues Gespräch“ sagen |
-| Beenden | „beenden“, „tschüss“ oder Strg+C |
-
-Weitere Startoptionen: `start.bat --text` (ohne Mikrofon) und `start.bat --mute` (ohne Stimme).
-
-### Beispiele
-- „Erstelle mir eine Präsentation über Elektroautos mit 8 Folien für die Schule.“
-- „Mach daraus das helle Design und öffne sie.“
-- „Schreib mir eine Bewerbung als Word-Dokument für eine Ausbildung als Fachinformatiker.“
-- „Erstelle eine Excel-Tabelle für mein monatliches Budget mit Summenformeln.“
-- „Programmier mir ein Snake-Spiel in Python und speichere es.“
-- „Was gibt es heute für Nachrichten?“ (Internetsuche)
-- „Öffne YouTube.“
-- „Erklär mir den Satz des Pythagoras.“
-
-Alle erstellten Dateien landen in **Dokumente\JARVIS**.
+Felder später ändern: Render → **jarvis** → **Environment** → speichern (JARVIS startet neu).
 
 ---
 
-## Stimme anpassen
-In der `.env`:
-- `ELEVENLABS_VOICE_ID`: eine andere Stimme aus der [ElevenLabs Voice Library](https://elevenlabs.io/app/voice-library). ID kopieren und eintragen. Standard ist „Daniel“ (tief, ruhig, britisch, passt zu JARVIS).
-- `ELEVENLABS_MODEL`: `eleven_flash_v2_5` ist am schnellsten und reagiert am flüssigsten. `eleven_multilingual_v2` klingt etwas schöner, ist aber langsamer.
+## 3A. E-Mail: Outlook / Hotmail verbinden
+Microsoft verlangt dafür eine eigene „App-Registrierung“. Das musst du nur einmal machen, es dauert ca. 10 Minuten.
 
-Ohne ElevenLabs-Key benutzt JARVIS automatisch die Windows-Systemstimme.
+1. <https://entra.microsoft.com> öffnen und mit deinem Microsoft-Konto anmelden.
+   Falls Microsoft sagt, dass du kein Verzeichnis hast: zuerst ein kostenloses Azure-Konto anlegen (<https://azure.microsoft.com/free>). Microsoft kann dabei eine Kreditkarte zur Prüfung verlangen. Wenn du das nicht möchtest, nimm Weg 3B mit Gmail.
+2. Links **„Anwendungen“** → **„App-Registrierungen“** → **„Neue Registrierung“**
+   - Name: `JARVIS`
+   - Kontotypen: **„Konten in einem beliebigen Organisationsverzeichnis und persönliche Microsoft-Konten“**
+   - Umleitungs-URI: leer lassen → **„Registrieren“**
+3. Auf der Übersichtsseite die **„Anwendungs-ID (Client)“** kopieren. Das ist dein `MS_CLIENT_ID`.
+4. Links **„Authentifizierung“** → ganz unten **„Öffentliche Clientflows zulassen“** auf **Ja** → **Speichern**
+5. Links **„API-Berechtigungen“** → **„Berechtigung hinzufügen“** → **Microsoft Graph** → **Delegierte Berechtigungen** → `Mail.Read` und `Mail.Send` anhaken → **Hinzufügen**
+6. Bei Render `MS_CLIENT_ID` eintragen und speichern.
+7. In JARVIS oben auf **✉️** tippen → **„Outlook verbinden“** → Code eingeben, mit Outlook anmelden, **Akzeptieren**. Fertig ✅
 
-## Fehlerbehebung
-- **„Kein Mikrofon“:** In Windows unter *Einstellungen → Datenschutz → Mikrofon* den Zugriff für Desktop-Apps erlauben. Falls `PyAudio` sich nicht installieren lässt: `.venv\Scripts\pip install pipwin && .venv\Scripts\pipwin install pyaudio`.
-- **„Zugangsschlüssel wird abgelehnt“:** Den Key in `.env` bzw. bei Render prüfen (bei Anthropic auch, ob Guthaben da ist).
-- **„Fehler … Statuscode 400“:** Hinter dem Statuscode steht jetzt der genaue Grund. Häufigste Ursache: Ein `ANTHROPIC_API_KEY` ohne Guthaben ist eingetragen. Lass ihn bei Render leer und nutze den kostenlosen `GEMINI_API_KEY`. Sind beide eingetragen, wechselt JARVIS automatisch auf Gemini.
-- **Genaue Fehlerdetails ansehen:** Render → Dashboard → *jarvis* → **Logs** (auf dem PC: im schwarzen Fenster von `start-web.bat`).
-- **„Kostenloses Kontingent ausgeschöpft“:** Gemini erlaubt kostenlos nur eine begrenzte Zahl an Anfragen pro Minute und Tag. Kurz warten.
-- **Gemini-Modell wechseln:** `GEMINI_MODEL` setzen (z. B. `gemini-2.5-flash`). Standard ist automatisch das neueste Flash-Modell.
-- **ElevenLabs-Fehler (401/quota):** Key prüfen oder Kontingent aufgebraucht. Im kostenlosen Tarif sind die Zeichen pro Monat begrenzt.
-- **Webseite: kein Ton:** Einmal irgendwo auf die Seite klicken. Browser spielen Ton erst nach einer Interaktion ab. Prüfe außerdem den Schalter „Stimme“.
-- **Webseite: Mikrofon geht nicht:** Chrome oder Edge verwenden (Firefox unterstützt keine Spracheingabe) und den Zugriff über das Schloss-Symbol in der Adressleiste erlauben.
-- **Neu installieren:** Ordner `.venv` löschen und `start.bat` erneut starten.
+## 3B. E-Mail: Gmail verbinden (einfacher)
+1. Im Google-Konto die **Bestätigung in zwei Schritten** einschalten: <https://myaccount.google.com/security>
+2. **App-Passwort** erstellen: <https://myaccount.google.com/apppasswords> → Name `JARVIS` → **Erstellen** → das 16-stellige Passwort kopieren
+3. Bei Render eintragen: `MAIL_ADDRESS` = deine Gmail-Adresse, `MAIL_APP_PASSWORD` = das App-Passwort
+
+GMX/Web.de funktionieren genauso. Dort in den Einstellungen unter **„POP3/IMAP Abruf“** den Zugriff erlauben und dein normales Passwort oder App-Passwort nehmen.
+
+---
+
+## So benutzt du JARVIS
+- **Sprechen:** 🎙️ antippen und reden. **🔁 Gesprächsmodus:** JARVIS hört nach jeder Antwort automatisch wieder zu.
+- **Mails:** „Habe ich neue Mails?“, „Was schreibt Max?“, „Antworte ihm, dass ich morgen Zeit habe“, „Schick eine Mail an lisa@web.de: …“
+- **Dateien:** „Erstelle eine Präsentation über Elektroautos mit 8 Folien“. Die Datei erscheint im Chat mit **Laden**-Knopf.
+- **Neues Gespräch:** ＋ oben rechts
+
+### Sicherheit beim Mailen
+JARVIS sendet nur, wenn **du** es in deiner Nachricht verlangst („schick“, „antworte“ …). Neue Mails gehen nur an Adressen, die du selbst nennst oder die dir geschrieben haben. Anweisungen, die in fremden Mails stehen, befolgt JARVIS nicht. Jede gesendete Mail siehst du im Chat.
+
+## Gut zu wissen
+- Gemini hat kostenlose Limits pro Minute und Tag. Bei „Kontingent ausgeschöpft“ kurz warten.
+- Im kostenlosen Gemini-Tarif darf Google Eingaben zur Verbesserung nutzen. Keine Passwörter o. Ä. in den Chat schreiben.
+- Render schläft nach 15 Minuten ohne Nutzung ein, der erste Aufruf danach dauert ca. 1 Minute.
+- Erstellte Dateien direkt herunterladen; nach einem Neustart sind sie weg.
+- Fehlerdetails: Render → jarvis → **Logs**.
+
+## Auf dem eigenen PC (optional)
+`start.bat` doppelklicken (Windows), Key in `.env` eintragen → <http://localhost:8000>.
 
 ## Für Entwickler
-```
-jarvis/
-  __main__.py   Hauptschleife (Eingabe → Denken → Sprechen)
-  brain.py      Claude-API mit Streaming und Werkzeug-Schleife
-  voice.py      ElevenLabs-Stimme, satzweise gestreamt
-  ears.py       Spracherkennung
-  hud.py        Terminal-Oberfläche
-  web.py        Webserver (FastAPI) für die Weboberfläche
-  static/       Webseite (HTML, CSS, JavaScript)
-  persona.py    Persönlichkeit (System-Prompt)
-  tools/        Dateien, PowerPoint, Word, Excel, Webseiten
-```
-Tests: `python -m pytest tests`
+`jarvis/ai.py` (Gemini), `jarvis/server.py` (FastAPI), `jarvis/mail/` (Outlook über Microsoft Graph, IMAP/SMTP), `jarvis/tools/` (Dateien, Office, Mail-Werkzeuge mit Sende-Schutz), `jarvis/static/` (Oberfläche). Tests: `python -m pytest tests`

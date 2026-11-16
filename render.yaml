@@ -1,28 +1,31 @@
-# Render-Blueprint: JARVIS als Webseite online stellen (kostenloser Tarif).
-# Anleitung: README.md -> "Online stellen"
+# Render-Blueprint: JARVIS online stellen (kostenlos). Anleitung: README.md
 services:
   - type: web
     name: jarvis
     runtime: python
     plan: free
     branch: claude/epic-carson-rk8vdn
-    buildCommand: pip install -r requirements-web.txt
-    startCommand: python -m jarvis.web --cloud
-    healthCheckPath: /api/status
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m jarvis --cloud
+    healthCheckPath: /api/info
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
       - key: JARVIS_OUTPUT_DIR
         value: /tmp/jarvis
-      # Kostenlos: Key von https://aistudio.google.com  (Gehirn = Google Gemini)
+      # Pflicht: kostenloser Key von https://aistudio.google.com
       - key: GEMINI_API_KEY
         sync: false
-      # Optional (kostenpflichtig): Claude als Gehirn. Leer lassen für die kostenlose Version.
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ELEVENLABS_API_KEY
-        sync: false
+      # Pflicht: dein Passwort für JARVIS (schützt auch deine Mails)
       - key: JARVIS_WEB_PASSWORD
         sync: false
       - key: JARVIS_USER_NAME
+        sync: false
+      # E-Mail, Weg A - Outlook/Hotmail: Anwendungs-ID aus Microsoft Entra (siehe README)
+      - key: MS_CLIENT_ID
+        sync: false
+      # E-Mail, Weg B - Gmail/GMX/Web.de: Adresse + App-Passwort
+      - key: MAIL_ADDRESS
+        sync: false
+      - key: MAIL_APP_PASSWORD
         sync: false

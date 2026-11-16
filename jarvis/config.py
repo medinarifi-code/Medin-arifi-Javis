@@ -1,4 +1,4 @@
-"""Konfiguration: liest Einstellungen aus der .env-Datei bzw. Umgebungsvariablen."""
+"""Einstellungen aus der .env-Datei bzw. den Render-Umgebungsvariablen."""
 
 from __future__ import annotations
 
@@ -21,63 +21,41 @@ def _default_output_dir() -> Path:
 
 @dataclass
 class Config:
-    anthropic_api_key: str | None
     gemini_api_key: str | None
     gemini_model: str | None
-    provider_setting: str
-    elevenlabs_api_key: str | None
-    elevenlabs_voice_id: str
-    elevenlabs_model: str
+    web_password: str
     user_name: str
     output_dir: Path
-    model: str
-    effort: str
-    language: str
+    # Outlook/Hotmail (Microsoft-Anmeldung)
+    ms_client_id: str | None
+    # Gmail/GMX/Web.de (App-Passwort)
+    mail_address: str | None
+    mail_password: str | None
+    mail_imap_host: str | None
+    mail_smtp_host: str | None
 
     @property
-    def provider(self) -> str:
-        """Welches Gehirn: 'anthropic' (Claude) oder 'gemini' (kostenlos)."""
-        if self.provider_setting in ("anthropic", "claude", "gemini"):
-            return "gemini" if self.provider_setting == "gemini" else "anthropic"
-        if self.anthropic_api_key:
-            return "anthropic"
-        if self.gemini_api_key:
-            return "gemini"
-        return "gemini"  # nichts eingetragen -> Hinweis auf den kostenlosen Weg
+    def outlook_enabled(self) -> bool:
+        return bool(self.ms_client_id)
 
     @property
-    def brain_ready(self) -> bool:
-        return bool(self.anthropic_api_key if self.provider == "anthropic" else self.gemini_api_key)
-
-    @property
-    def brain_label(self) -> str:
-        if self.provider == "anthropic":
-            return f"Claude ({self.model})"
-        return f"Gemini ({self.gemini_model or 'kostenlos'})"
-
-    @property
-    def missing_key_hint(self) -> str:
-        if self.provider == "anthropic":
-            return "ANTHROPIC_API_KEY fehlt."
-        return "GEMINI_API_KEY fehlt (kostenlos auf aistudio.google.com)."
+    def imap_enabled(self) -> bool:
+        return bool(self.mail_address and self.mail_password)
 
 
 def load_config() -> Config:
     output_dir = Path(os.getenv("JARVIS_OUTPUT_DIR") or _default_output_dir()).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
+    env = lambda name: (os.getenv(name) or "").strip() or None  # noqa: E731
     return Config(
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
-        gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or None,
-        gemini_model=os.getenv("GEMINI_MODEL") or None,
-        provider_setting=(os.getenv("JARVIS_PROVIDER") or "auto").strip().lower(),
-        elevenlabs_api_key=os.getenv("ELEVENLABS_API_KEY") or None,
-        # Standard: "Daniel" (tiefe, britisch-ruhige Stimme) - spricht mit dem
-        # Multilingual-Modell fließend Deutsch. Eigene Voice-ID in .env setzen.
-        elevenlabs_voice_id=os.getenv("ELEVENLABS_VOICE_ID") or "onwK4e9ZLuTAKqWW03F9",
-        elevenlabs_model=os.getenv("ELEVENLABS_MODEL") or "eleven_flash_v2_5",
-        user_name=os.getenv("JARVIS_USER_NAME") or "Sir",
+        gemini_api_key=env("GEMINI_API_KEY") or env("GOOGLE_API_KEY"),
+        gemini_model=env("GEMINI_MODEL"),
+        web_password=env("JARVIS_WEB_PASSWORD") or "",
+        user_name=env("JARVIS_USER_NAME") or "Sir",
         output_dir=output_dir,
-        model=os.getenv("JARVIS_MODEL") or "claude-opus-5-5",
-        effort=os.getenv("JARVIS_EFFORT") or "low",
-        language=os.getenv("JARVIS_LANGUAGE") or "de-DE",
+        ms_client_id=env("MS_CLIENT_ID"),
+        mail_address=env("MAIL_ADDRESS"),
+        mail_password=(env("MAIL_APP_PASSWORD") or "").replace(" ", "") or None,  # Google zeigt es mit Leerzeichen an
+        mail_imap_host=env("MAIL_IMAP_HOST"),
+        mail_smtp_host=env("MAIL_SMTP_HOST"),
     )

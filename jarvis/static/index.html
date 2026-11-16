@@ -3,116 +3,79 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>J.A.R.V.I.S.</title>
-  <meta name="theme-color" content="#050b12">
+  <title>JARVIS</title>
+  <meta name="theme-color" content="#0b1220">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-180.png">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='none' stroke='%2300d4ff' stroke-width='10'/%3E%3Ccircle cx='50' cy='50' r='16' fill='%2300d4ff'/%3E%3C/svg%3E">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="app.css">
 </head>
-<body class="state-idle">
-  <div class="grid-bg" aria-hidden="true"></div>
+<body>
+  <!-- Anmeldung -->
+  <section id="login" class="login" hidden>
+    <form id="login-form" class="login-card">
+      <div class="orb big" aria-hidden="true"></div>
+      <h1>JARVIS</h1>
+      <p>Bitte Passwort eingeben</p>
+      <input id="login-pw" type="password" autocomplete="current-password" placeholder="Passwort" required>
+      <button type="submit" class="primary">Anmelden</button>
+      <p id="login-error" class="error" hidden>Falsches Passwort</p>
+    </form>
+  </section>
 
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-dot"></span>
-      <span class="brand-name">J.A.R.V.I.S.</span>
-    </div>
-    <div class="sys">
-      <span id="clock">--:--</span>
-      <span class="sep">|</span>
-      <span id="sys-brain" class="pill">KERN</span>
-      <span id="sys-voice" class="pill">STIMME</span>
-      <span id="sys-mic" class="pill">MIKRO</span>
-    </div>
-    <div class="top-actions">
-      <button id="btn-files" class="icon-btn" title="Erstellte Dateien" aria-label="Erstellte Dateien">
-        <svg viewBox="0 0 24 24"><path d="M4 4h6l2 2h8v14H4z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
-      </button>
-      <button id="btn-reset" class="icon-btn" title="Neues Gespräch" aria-label="Neues Gespräch">
-        <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-    </div>
-  </header>
+  <!-- Hauptansicht -->
+  <div id="app" class="app" hidden>
+    <header class="top">
+      <div class="brand">
+        <div class="orb" aria-hidden="true"></div>
+        <div>
+          <div class="name">JARVIS</div>
+          <div id="state" class="state">Bereit</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="btn-voice" class="icon" aria-pressed="true" title="Stimme an/aus" aria-label="Stimme an/aus">🔊</button>
+        <button id="btn-conv" class="icon" aria-pressed="false" title="Gesprächsmodus: hört nach jeder Antwort wieder zu" aria-label="Gesprächsmodus">🔁</button>
+        <button id="btn-mail" class="icon" title="E-Mail" aria-label="E-Mail">✉️<span id="mail-dot" class="dot"></span></button>
+        <button id="btn-new" class="icon" title="Neues Gespräch" aria-label="Neues Gespräch">＋</button>
+      </div>
+    </header>
 
-  <main class="layout">
-    <section class="core">
-      <button id="reactor" class="reactor" aria-label="Sprechen" title="Klicken zum Sprechen">
-        <svg viewBox="0 0 200 200" aria-hidden="true">
-          <defs>
-            <radialGradient id="glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#e6fbff"/>
-              <stop offset="35%" stop-color="#00d4ff"/>
-              <stop offset="100%" stop-color="#00d4ff" stop-opacity="0"/>
-            </radialGradient>
-          </defs>
-          <circle class="r-halo" cx="100" cy="100" r="96" fill="url(#glow)" opacity=".18"/>
-          <g class="r-spin-slow">
-            <circle cx="100" cy="100" r="88" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 6" opacity=".7"/>
-          </g>
-          <g class="r-spin">
-            <circle cx="100" cy="100" r="76" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="60 20 10 20" opacity=".9"/>
-          </g>
-          <g class="r-spin-rev">
-            <circle cx="100" cy="100" r="62" fill="none" stroke="#ffb300" stroke-width="2" stroke-dasharray="4 10 40 10" opacity=".8"/>
-          </g>
-          <g class="r-segments">
-            <path d="M100 52 L108 70 L92 70 Z" /><path d="M148 100 L130 108 L130 92 Z" />
-            <path d="M100 148 L92 130 L108 130 Z" /><path d="M52 100 L70 92 L70 108 Z" />
-          </g>
-          <circle class="r-core" cx="100" cy="100" r="26" fill="url(#glow)"/>
-          <circle cx="100" cy="100" r="26" fill="none" stroke="#e6fbff" stroke-width="2"/>
-        </svg>
-      </button>
-      <div id="state-label" class="state-label">BEREIT</div>
-      <div id="interim" class="interim" aria-live="polite"></div>
-      <label class="toggle">
-        <input type="checkbox" id="conv-mode">
-        <span class="track"><span class="thumb"></span></span>
-        <span>Gesprächsmodus</span>
-      </label>
-      <label class="toggle">
-        <input type="checkbox" id="voice-on" checked>
-        <span class="track"><span class="thumb"></span></span>
-        <span>Stimme</span>
-      </label>
-    </section>
+    <main id="log" class="log" aria-live="polite">
+      <div id="welcome" class="welcome">
+        <div class="orb big" aria-hidden="true"></div>
+        <h2 id="hello">Wie kann ich helfen?</h2>
+        <div class="chips">
+          <button class="chip" data-q="Habe ich neue E-Mails?">📬 Neue Mails</button>
+          <button class="chip" data-q="Erstelle mir eine Präsentation über ">📊 Präsentation</button>
+          <button class="chip" data-q="Was sind die wichtigsten Nachrichten heute?">📰 Nachrichten</button>
+          <button class="chip" data-q="Wie wird das Wetter heute?">🌤️ Wetter</button>
+        </div>
+      </div>
+    </main>
 
-    <section class="chat">
-      <div id="log" class="log" aria-live="polite"></div>
+    <footer class="bar">
+      <div id="interim" class="interim"></div>
       <form id="composer" class="composer" autocomplete="off">
-        <button type="button" id="mic" class="mic" aria-label="Mikrofon" title="Sprechen">
-          <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        </button>
-        <textarea id="input" rows="1" placeholder="Nachricht an JARVIS …"></textarea>
-        <button type="submit" id="send" class="send" aria-label="Senden">
-          <svg viewBox="0 0 24 24"><path d="M4 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        <textarea id="input" rows="1" placeholder="Frag JARVIS …" aria-label="Nachricht"></textarea>
+        <button type="submit" id="send" class="send" aria-label="Senden">➤</button>
       </form>
-    </section>
-  </main>
+      <button id="mic" class="mic" aria-label="Sprechen">🎙️</button>
+    </footer>
+  </div>
 
-  <aside id="files-panel" class="files-panel" hidden>
-    <div class="files-head">
-      <span>ERSTELLTE DATEIEN</span>
-      <button id="files-close" class="icon-btn" aria-label="Schließen">✕</button>
+  <!-- E-Mail-Dialog -->
+  <dialog id="mail-dialog" class="sheet">
+    <div class="sheet-head">
+      <h3>E-Mail</h3>
+      <button class="icon" id="mail-close" aria-label="Schließen">✕</button>
     </div>
-    <div id="files-list" class="files-list"></div>
-  </aside>
-
-  <template id="file-card">
-    <div class="file-card">
-      <div class="file-icon"></div>
-      <div class="file-meta"><div class="file-name"></div><div class="file-type"></div></div>
-      <a class="file-dl" download>Download</a>
-    </div>
-  </template>
+    <div id="mail-body"></div>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

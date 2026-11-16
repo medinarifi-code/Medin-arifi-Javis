@@ -1,33 +1,19 @@
 @echo off
 chcp 65001 >nul
-title J.A.R.V.I.S.
+title JARVIS
 cd /d "%~dp0"
-
 where python >nul 2>nul
 if errorlevel 1 (
-    echo Python wurde nicht gefunden. Bitte Python 3.11 oder neuer von https://www.python.org installieren
-    echo und beim Installieren "Add Python to PATH" anhaken.
+    echo Python fehlt. Bitte von https://www.python.org installieren ^("Add python.exe to PATH" anhaken^).
     pause
     exit /b 1
 )
-
-if not exist ".venv\Scripts\python.exe" (
-    echo [JARVIS] Erster Start: richte Umgebung ein ...
-    python -m venv .venv
-    ".venv\Scripts\python.exe" -m pip install --upgrade pip
-    ".venv\Scripts\python.exe" -m pip install -r requirements.txt
-    if errorlevel 1 (
-        echo Installation fehlgeschlagen. Bitte Fehlermeldung oben pruefen.
-        pause
-        exit /b 1
-    )
-)
-
+if not exist ".venv\Scripts\python.exe" python -m venv .venv
+".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
 if not exist ".env" (
     copy ".env.example" ".env" >nul
-    echo [JARVIS] Die Datei .env wurde angelegt. Bitte deine API-Keys eintragen und speichern.
+    echo Bitte in der Datei .env deinen GEMINI_API_KEY eintragen und speichern.
     notepad ".env"
 )
-
-".venv\Scripts\python.exe" -m jarvis %*
+".venv\Scripts\python.exe" -m jarvis
 pause

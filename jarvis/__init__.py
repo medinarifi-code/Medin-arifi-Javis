@@ -1,3 +1,3 @@
-"""JARVIS - persönlicher KI-Sprachassistent."""
+"""JARVIS - kostenloser KI-Assistent mit E-Mail."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
