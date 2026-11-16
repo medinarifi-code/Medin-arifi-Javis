@@ -21,8 +21,8 @@ def _default_output_dir() -> Path:
 
 @dataclass
 class Config:
-    gemini_api_key: str | None
-    gemini_model: str | None
+    groq_api_key: str | None
+    groq_model: str | None
     web_password: str
     user_name: str
     output_dir: Path
@@ -48,8 +48,8 @@ def load_config() -> Config:
     output_dir.mkdir(parents=True, exist_ok=True)
     env = lambda name: (os.getenv(name) or "").strip() or None  # noqa: E731
     return Config(
-        gemini_api_key=env("GEMINI_API_KEY") or env("GOOGLE_API_KEY"),
-        gemini_model=env("GEMINI_MODEL"),
+        groq_api_key=env("GROQ_API_KEY"),
+        groq_model=env("GROQ_MODEL"),
         web_password=env("JARVIS_WEB_PASSWORD") or "",
         user_name=env("JARVIS_USER_NAME") or "Sir",
         output_dir=output_dir,

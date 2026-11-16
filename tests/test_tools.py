@@ -36,7 +36,7 @@ def test_path_escape_and_missing_fields(tmp_path):
         execute("create_pptx", {"filename": "a", "title": "b"}, c)
 
 
-def test_schemas_are_gemini_safe():
+def test_schemas_are_simple():
     import json
     text = json.dumps(tool_definitions(True))
     assert "additionalProperties" not in text and '"null"' not in text

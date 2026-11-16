@@ -1,3 +1,3 @@
-"""JARVIS - kostenloser KI-Assistent mit E-Mail."""
+"""JARVIS - kostenloser KI-Assistent (Groq) mit E-Mail."""
 
 __version__ = "2.0.0"

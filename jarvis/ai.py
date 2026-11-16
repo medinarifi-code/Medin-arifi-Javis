@@ -1,15 +1,15 @@
-"""Das Gehirn von JARVIS: Google Gemini (kostenlos) mit Werkzeugen und Streaming."""
+"""Das Gehirn von JARVIS: Groq (kostenlos) mit Werkzeugen und Streaming."""
 
 from __future__ import annotations
 
-import itertools
+import json
 import logging
 import re
 import time
 from typing import Callable
 
-from google import genai
-from google.genai import errors, types
+import groq
+from groq import Groq
 
 from .config import Config
 from .persona import system_prompt
@@ -20,25 +20,31 @@ log = logging.getLogger("jarvis")
 OnText = Callable[[str], None]
 OnStatus = Callable[[str], None]
 
-# Ist ein Modell nicht verfügbar (oder Kontingent leer), wird automatisch das nächste probiert.
-DEFAULT_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
-MAX_STEPS = 20
+# Ist ein Modell nicht verfügbar oder sein Gratis-Kontingent leer, nimmt JARVIS das nächste.
+DEFAULT_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+SEARCH_MODELS = ["groq/compound-mini", "groq/compound"]
+MAX_STEPS = 15
+HISTORY_LIMIT = 16  # so bleibt jede Anfrage im kostenlosen Token-Limit
 
 
 def short_error(message: str, limit: int = 160) -> str:
-    text = re.sub(r"AIza[\w-]+", "***", str(message or ""))
+    text = re.sub(r"gsk_[\w-]+", "***", str(message or ""))
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit] + ("…" if len(text) > limit else "")
+
+
+class _Retry(Exception):
+    """Interner Hinweis: Anfrage mit angepassten Einstellungen wiederholen."""
 
 
 class Jarvis:
     """Ein Gespräch (eine Browser-Sitzung)."""
 
-    def __init__(self, cfg: Config, client: genai.Client | None = None):
+    def __init__(self, cfg: Config, client: Groq | None = None):
         self.cfg = cfg
-        self.client = client or genai.Client(api_key=cfg.gemini_api_key)
-        self.models = [cfg.gemini_model] if cfg.gemini_model else list(DEFAULT_MODELS)
-        self.history: list[types.Content] = []
+        self.client = client or Groq(api_key=cfg.groq_api_key or "missing", max_retries=1, timeout=60)
+        self.models = [cfg.groq_model] if cfg.groq_model else list(DEFAULT_MODELS)
+        self.history: list[dict] = []
         self.known_addresses: set[str] = set()
         self.tools_ok = True
 
@@ -51,17 +57,17 @@ class Jarvis:
 
     # ------------------------------------------------------------------ öffentlich
     def ask(self, text: str, on_text: OnText, on_status: OnStatus, on_event=None, mailbox=None) -> None:
-        if not self.cfg.gemini_api_key:
-            on_text("Mir fehlt noch der kostenlose GEMINI_API_KEY. Bitte bei Render unter Environment eintragen.")
+        if not self.cfg.groq_api_key:
+            on_text("Mir fehlt noch der kostenlose GROQ_API_KEY. Bitte bei Render unter Environment eintragen.")
             return
         ctx = ToolContext(output_dir=self.cfg.output_dir, mailbox=mailbox, user_message=text,
                           known_addresses=self.known_addresses, on_event=on_event)
         checkpoint = len(self.history)
-        self.history.append(types.Content(role="user", parts=[types.Part(text=text)]))
+        self.history.append({"role": "user", "content": text})
         try:
             self._run(ctx, on_text, on_status)
-        except errors.APIError as e:
-            log.error("Gemini-Fehler %s (%s): %s", e.code, self.model, getattr(e, "message", e))
+        except groq.APIError as e:
+            log.error("Groq-Fehler (%s): %s", self.model, short_error(str(e), 500))
             del self.history[checkpoint:]
             on_text(self._explain(e))
         except Exception as e:  # noqa: BLE001
@@ -69,120 +75,150 @@ class Jarvis:
             del self.history[checkpoint:]
             on_text(f"Da ist etwas schiefgelaufen ({type(e).__name__}: {short_error(str(e), 100)}). Bitte noch einmal versuchen.")
 
-    # ------------------------------------------------------------------ intern
-    def _config(self, ctx: ToolContext) -> types.GenerateContentConfig:
-        connected = ctx.mailbox is not None
-        decls = []
-        for t in tool_definitions(connected):
-            if t["parameters"]:
-                decls.append(types.FunctionDeclaration(name=t["name"], description=t["description"],
-                                                       parameters_json_schema=t["parameters"]))
-            else:
-                decls.append(types.FunctionDeclaration(name=t["name"], description=t["description"]))
-        return types.GenerateContentConfig(
-            system_instruction=system_prompt(self.cfg, connected),
-            tools=[types.Tool(function_declarations=decls)] if self.tools_ok else None,
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-        )
+    # ------------------------------------------------------------------ Anfrage bauen
+    def _messages(self, ctx: ToolContext) -> list[dict]:
+        recent = self.history[-HISTORY_LIMIT:]
+        while recent and recent[0]["role"] != "user":  # nie mit einem halben Werkzeug-Block beginnen
+            recent = recent[1:]
+        return [{"role": "system", "content": system_prompt(self.cfg, ctx.mailbox is not None)}, *recent]
 
-    def _explain(self, e: errors.APIError) -> str:
+    def _tools(self, ctx: ToolContext) -> list[dict] | None:
+        if not self.tools_ok:
+            return None
+        return [{"type": "function", "function": {
+            "name": t["name"], "description": t["description"],
+            "parameters": t["parameters"] or {"type": "object", "properties": {}},
+        }} for t in tool_definitions(ctx.mailbox is not None)]
+
+    # ------------------------------------------------------------------ Fehler
+    def _explain(self, e: groq.APIError) -> str:
         msg = str(getattr(e, "message", "") or e)
-        low = msg.lower()
-        if e.code == 429:
+        if isinstance(e, groq.AuthenticationError):
+            return "Mein GROQ_API_KEY wird abgelehnt. Bitte den Key bei Render prüfen (er beginnt mit gsk_)."
+        if isinstance(e, groq.RateLimitError):
             return "Das kostenlose Kontingent ist gerade ausgeschöpft. Bitte eine Minute warten und es erneut versuchen."
-        if "location" in low and "not supported" in low:
-            return "Google bietet die kostenlose KI in dieser Region nicht an. Bitte JARVIS über den Render-Link benutzen."
-        if e.code in (400, 401, 403) and ("api key" in low or "api_key" in low or "permission" in low):
-            return "Mein GEMINI_API_KEY wird abgelehnt. Bitte den Key bei Render prüfen."
-        if e.code in (500, 502, 503, 504):
-            return "Die Google-Server sind gerade überlastet. Bitte gleich noch einmal versuchen."
-        return f"Fehler von Google (Statuscode {e.code}): {short_error(msg)}"
+        if isinstance(e, groq.PermissionDeniedError):
+            return f"Groq verweigert den Zugriff: {short_error(msg)}"
+        if isinstance(e, groq.APIConnectionError):
+            return "Ich kann die Groq-Server gerade nicht erreichen. Bitte gleich noch einmal versuchen."
+        if isinstance(e, groq.InternalServerError):
+            return "Die Groq-Server sind gerade überlastet. Bitte gleich noch einmal versuchen."
+        code = getattr(e, "status_code", "?")
+        return f"Fehler von Groq (Statuscode {code}): {short_error(msg)}"
 
-    def _open_stream(self, ctx: ToolContext):
-        """Startet eine Anfrage: Modellwechsel bei 404/429, einmal warten bei Überlastung,
-        Reparatur bei abgelehnten Werkzeugen bzw. kaputtem Verlauf."""
-        waited, repaired = False, set()
-        while True:
-            try:
-                stream = self.client.models.generate_content_stream(
-                    model=self.model, contents=self.history, config=self._config(ctx))
-                return next(stream, None), stream
-            except errors.APIError as e:
-                low = str(getattr(e, "message", "") or e).lower()
-                if e.code in (429, 500, 503) and not waited:
-                    waited = True
-                    time.sleep(2)
-                    continue
-                if e.code in (404, 429) and len(self.models) > 1:
-                    log.warning("Modell %s nicht nutzbar (%s) - nehme %s", self.model, e.code, self.models[1])
-                    self.models.pop(0)
-                    waited = False
-                    continue
-                if e.code == 400 and "history" not in repaired and len(self.history) > 1 and any(
-                        w in low for w in ("thought_signature", "thought signature", "function call turn",
-                                           "function response turn", "comes immediately after")):
-                    log.warning("Verlauf abgelehnt - neu beginnen: %s", low[:200])
-                    self.history[:] = [self.history[-1]]
-                    repaired.add("history")
-                    continue
-                if e.code == 400 and self.tools_ok and any(w in low for w in ("function", "schema", "tool", "parameter")):
-                    log.warning("Werkzeuge abgelehnt - ohne Werkzeuge weiter: %s", low[:200])
-                    self.tools_ok = False
-                    continue
-                raise
+    def _handle(self, e: groq.APIError, state: dict) -> None:
+        """Entscheidet, ob und wie eine fehlgeschlagene Anfrage wiederholt wird (sonst: weiterwerfen)."""
+        low = str(getattr(e, "message", "") or e).lower()
+        status = getattr(e, "status_code", None)
+        if isinstance(e, groq.InternalServerError) and not state.get("waited"):
+            state["waited"] = True
+            time.sleep(2)
+            raise _Retry
+        model_gone = status == 404 or "decommissioned" in low or "does not exist" in low or "model_not_found" in low
+        if (isinstance(e, groq.RateLimitError) or model_gone) and len(self.models) > 1:
+            log.warning("Modell %s nicht nutzbar (%s) - nehme %s", self.model, status, self.models[1])
+            self.models.pop(0)
+            raise _Retry
+        if status == 413 or "too large" in low or "context_length" in low or "reduce the length" in low:
+            if not state.get("trimmed"):
+                state["trimmed"] = True
+                self.history[:] = self.history[-1:] if self.history[-1]["role"] == "user" else self.history[-2:]
+                raise _Retry
+        if "tool_use_failed" in low or "failed_generation" in low or "tool call validation" in low:
+            tries = state.get("tool_fail", 0) + 1
+            state["tool_fail"] = tries
+            if tries == 1:
+                raise _Retry
+            if tries == 2 and len(self.models) > 1:
+                self.models.pop(0)
+                raise _Retry
+            if self.tools_ok:
+                log.warning("Werkzeug-Aufrufe scheitern - antworte ohne Werkzeuge")
+                self.tools_ok = False
+                raise _Retry
+        raise e
+
+    # ------------------------------------------------------------------ Schleife
+    def _turn(self, ctx: ToolContext, on_text: OnText) -> tuple[str, list[dict], bool]:
+        """Eine Anfrage, live gestreamt. Rückgabe: (Text, Werkzeug-Aufrufe, schon etwas ausgegeben?)"""
+        kwargs = {"model": self.model, "messages": self._messages(ctx), "stream": True, "temperature": 0.6}
+        tools = self._tools(ctx)
+        if tools:
+            kwargs.update(tools=tools, tool_choice="auto")
+        text, calls, emitted = "", {}, False
+        for chunk in self.client.chat.completions.create(**kwargs):
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                text += delta.content
+                emitted = True
+                on_text(delta.content)
+            for tc in delta.tool_calls or []:
+                slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                if tc.function and tc.function.name:
+                    slot["name"] += tc.function.name
+                if tc.function and tc.function.arguments:
+                    slot["arguments"] += tc.function.arguments
+        return text, [calls[i] for i in sorted(calls)], emitted
 
     def _run(self, ctx: ToolContext, on_text: OnText, on_status: OnStatus) -> None:
-        for _ in range(MAX_STEPS):
-            first, stream = self._open_stream(ctx)
-            parts: list[types.Part] = []
-            calls: list[types.FunctionCall] = []
-            finish = None
-            for chunk in itertools.chain([first] if first is not None else [], stream):  # live streamen
-                cand = chunk.candidates[0] if chunk.candidates else None
-                if cand is None:
+        state: dict = {}
+        steps = 0
+        while steps < MAX_STEPS:
+            try:
+                text, calls, _ = self._turn(ctx, on_text)
+            except groq.APIError as e:
+                try:
+                    self._handle(e, state)
+                except _Retry:
                     continue
-                finish = cand.finish_reason or finish
-                for part in (cand.content.parts if cand.content and cand.content.parts else []):
-                    parts.append(part)
-                    if part.thought:
-                        continue
-                    if part.text:
-                        on_text(part.text)
-                    if part.function_call:
-                        calls.append(part.function_call)
-
-            if not parts:
-                reason = str(finish or "")
-                on_text("Darauf kann ich leider nicht antworten." if any(w in reason for w in ("SAFETY", "PROHIBITED", "BLOCK"))
-                        else "Ich habe gerade keine Antwort erhalten. Bitte noch einmal versuchen.")
-                self.history.pop()
-                return
-            self.history.append(types.Content(role="model", parts=parts))
+            steps += 1
             if not calls:
+                if not text.strip():
+                    on_text("Ich habe gerade keine Antwort erhalten. Bitte noch einmal versuchen.")
+                    self.history.pop()
+                    return
+                self.history.append({"role": "assistant", "content": text})
                 return
-            self.history.append(types.Content(role="user", parts=[self._call(c, ctx, on_status) for c in calls]))
+            for i, c in enumerate(calls):
+                c["id"] = c["id"] or f"call_{steps}_{i}"
+            self.history.append({"role": "assistant", "content": text or None, "tool_calls": [
+                {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
+                for c in calls]})
+            for c in calls:
+                self.history.append({"role": "tool", "tool_call_id": c["id"], "content": self._call(c, ctx, on_status)})
         on_text(" Ich habe die maximale Anzahl an Arbeitsschritten erreicht.")
 
-    def _call(self, call: types.FunctionCall, ctx: ToolContext, on_status: OnStatus) -> types.Part:
-        name, args = call.name or "", dict(call.args or {})
+    def _call(self, call: dict, ctx: ToolContext, on_status: OnStatus) -> str:
+        name = call["name"]
+        try:
+            args = json.loads(call["arguments"] or "{}")
+            if not isinstance(args, dict):
+                raise ValueError("kein Objekt")
+        except ValueError:
+            return "Fehler: Die Werkzeug-Eingabe war kein gültiges JSON. Bitte erneut versuchen."
         on_status(describe(name, args))
         try:
             if name == "search_web":
-                payload = {"result": self._search(str(args.get("query", "")))}
-            else:
-                payload = {"result": execute(name, args, ctx)}
+                return self._search(str(args.get("query", "")))
+            return execute(name, args, ctx)
         except ToolError as e:
-            payload = {"error": str(e)}
+            return f"Fehler: {e}"
         except Exception as e:  # noqa: BLE001
             log.exception("Werkzeug %s fehlgeschlagen", name)
-            payload = {"error": f"{type(e).__name__}: {e}"}
-        return types.Part(function_response=types.FunctionResponse(id=call.id, name=name, response=payload))
+            return f"Fehler: {type(e).__name__}: {e}"
 
     def _search(self, query: str) -> str:
-        res = self.client.models.generate_content(
-            model=self.model,
-            contents=f"Recherchiere im Internet und fasse die wichtigsten aktuellen Fakten auf Deutsch zusammen: {query}",
-            config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
-        )
-        return res.text or "Keine Ergebnisse gefunden."
-
+        prompt = f"Suche im Internet und fasse die wichtigsten aktuellen Fakten kurz auf Deutsch zusammen: {query}"
+        last = None
+        for model in SEARCH_MODELS:
+            try:
+                res = self.client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}])
+                return res.choices[0].message.content or "Keine Ergebnisse gefunden."
+            except groq.APIError as e:
+                last = e
+                log.warning("Websuche mit %s fehlgeschlagen: %s", model, short_error(str(e), 300))
+        return f"Fehler: Die Internetsuche ist gerade nicht verfügbar ({short_error(str(last), 100)}). Antworte aus deinem Wissen und sage, dass es nicht ganz aktuell sein könnte."

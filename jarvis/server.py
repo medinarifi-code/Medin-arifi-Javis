@@ -115,7 +115,7 @@ def info():
     return {
         "needs_password": bool(cfg.web_password),
         "user_name": cfg.user_name,
-        "ai_ready": bool(cfg.gemini_api_key),
+        "ai_ready": bool(cfg.groq_api_key),
         "outlook_available": cfg.outlook_enabled,
         "imap_address": cfg.mail_address if cfg.imap_enabled else None,
     }

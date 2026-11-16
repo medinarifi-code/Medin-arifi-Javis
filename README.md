@@ -1,6 +1,6 @@
 # JARVIS – dein kostenloser KI-Assistent
 
-Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit Google Gemini:
+Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit der KI von Groq:
 
 - 💬 Beantwortet Fragen, per Text oder Sprache (Mikrofon + Stimme)
 - ✉️ Liest deine **E-Mails** und **beantwortet** sie (Outlook/Hotmail oder Gmail/GMX/Web.de)
@@ -10,10 +10,10 @@ Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit Google 
 
 ---
 
-## 1. Kostenlosen Gemini-Key holen
-1. <https://aistudio.google.com> öffnen und mit dem Google-Konto anmelden
-2. **„Get API key“** → **„Create API key“**
-3. Key kopieren (beginnt mit `AIza…`)
+## 1. Kostenlosen Groq-Key holen (ohne Kreditkarte)
+1. <https://console.groq.com> öffnen und anmelden (mit Google-Konto oder E-Mail)
+2. Links auf **„API Keys“** → **„Create API Key“** → Name `jarvis` → **Submit**
+3. Key sofort kopieren (beginnt mit `gsk_…`, wird nur einmal angezeigt)
 
 ## 2. Online stellen bei Render (kostenlos)
 1. <https://render.com> → **„Get Started“** → mit **GitHub** anmelden
@@ -21,7 +21,7 @@ Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit Google 
 3. Felder ausfüllen:
    | Feld | Inhalt |
    |---|---|
-   | `GEMINI_API_KEY` | dein Key aus Schritt 1 |
+   | `GROQ_API_KEY` | dein Key aus Schritt 1 |
    | `JARVIS_WEB_PASSWORD` | ein Passwort, das du dir ausdenkst (schützt JARVIS und deine Mails) |
    | `JARVIS_USER_NAME` | wie JARVIS dich nennt, z. B. `Medin` |
    | `MS_CLIENT_ID` | für Outlook, siehe 3A (sonst leer lassen) |
@@ -67,8 +67,8 @@ GMX/Web.de funktionieren genauso. Dort in den Einstellungen unter **„POP3/IMAP
 JARVIS sendet nur, wenn **du** es in deiner Nachricht verlangst („schick“, „antworte“ …). Neue Mails gehen nur an Adressen, die du selbst nennst oder die dir geschrieben haben. Anweisungen, die in fremden Mails stehen, befolgt JARVIS nicht. Jede gesendete Mail siehst du im Chat.
 
 ## Gut zu wissen
-- Gemini hat kostenlose Limits pro Minute und Tag. Bei „Kontingent ausgeschöpft“ kurz warten.
-- Im kostenlosen Gemini-Tarif darf Google Eingaben zur Verbesserung nutzen. Keine Passwörter o. Ä. in den Chat schreiben.
+- Groq hat kostenlose Limits pro Minute und Tag. Ist eins erreicht, wechselt JARVIS automatisch auf ein anderes Modell. Bei „Kontingent ausgeschöpft“ kurz warten.
+- Schreib keine Passwörter o. Ä. in den Chat.
 - Render schläft nach 15 Minuten ohne Nutzung ein, der erste Aufruf danach dauert ca. 1 Minute.
 - Erstellte Dateien direkt herunterladen; nach einem Neustart sind sie weg.
 - Fehlerdetails: Render → jarvis → **Logs**.
@@ -77,4 +77,4 @@ JARVIS sendet nur, wenn **du** es in deiner Nachricht verlangst („schick“, �
 `start.bat` doppelklicken (Windows), Key in `.env` eintragen → <http://localhost:8000>.
 
 ## Für Entwickler
-`jarvis/ai.py` (Gemini), `jarvis/server.py` (FastAPI), `jarvis/mail/` (Outlook über Microsoft Graph, IMAP/SMTP), `jarvis/tools/` (Dateien, Office, Mail-Werkzeuge mit Sende-Schutz), `jarvis/static/` (Oberfläche). Tests: `python -m pytest tests`
+`jarvis/ai.py` (Groq), `jarvis/server.py` (FastAPI), `jarvis/mail/` (Outlook über Microsoft Graph, IMAP/SMTP), `jarvis/tools/` (Dateien, Office, Mail-Werkzeuge mit Sende-Schutz), `jarvis/static/` (Oberfläche). Tests: `python -m pytest tests`

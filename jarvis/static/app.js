@@ -312,7 +312,7 @@
   async function showApp() {
     $("#login").hidden = true; $("#app").hidden = false;
     $("#hello").textContent = `Hallo ${info.user_name || ""}, wie kann ich helfen?`.replace(" ,", ",");
-    if (!info.ai_ready) bubble("jarvis", "Mir fehlt noch der kostenlose GEMINI_API_KEY. Bitte bei Render unter Environment eintragen.", "error");
+    if (!info.ai_ready) bubble("jarvis", "Mir fehlt noch der kostenlose GROQ_API_KEY (console.groq.com). Bitte bei Render unter Environment eintragen.", "error");
     $("#btn-voice").setAttribute("aria-pressed", store.get("jarvis-voice", "1") === "1" ? "true" : "false");
     setConv(store.get("jarvis-conv") === "1");
     await loadMail();

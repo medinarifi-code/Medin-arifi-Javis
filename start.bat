@@ -12,7 +12,7 @@ if not exist ".venv\Scripts\python.exe" python -m venv .venv
 ".venv\Scripts\python.exe" -m pip install -q -r requirements.txt
 if not exist ".env" (
     copy ".env.example" ".env" >nul
-    echo Bitte in der Datei .env deinen GEMINI_API_KEY eintragen und speichern.
+    echo Bitte in der Datei .env deinen GROQ_API_KEY eintragen und speichern.
     notepad ".env"
 )
 ".venv\Scripts\python.exe" -m jarvis
