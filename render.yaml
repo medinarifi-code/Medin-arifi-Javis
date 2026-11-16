@@ -14,6 +14,10 @@ services:
         value: 3.12.7
       - key: JARVIS_OUTPUT_DIR
         value: /tmp/jarvis
+      # Kostenlos: Key von https://aistudio.google.com  (Gehirn = Google Gemini)
+      - key: GEMINI_API_KEY
+        sync: false
+      # Optional (kostenpflichtig): Claude als Gehirn. Leer lassen für die kostenlose Version.
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ELEVENLABS_API_KEY

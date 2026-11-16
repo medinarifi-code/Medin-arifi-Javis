@@ -18,6 +18,15 @@ OnEvent = Callable[[dict[str, Any]], None]
 MAX_STEPS = 25  # Sicherheitsgrenze für Werkzeug-Runden pro Anfrage
 
 
+def create_brain(cfg: Config, web: bool = False):
+    """Wählt das Gehirn: Claude (Anthropic) oder kostenlos Gemini (Google)."""
+    if cfg.provider == "gemini":
+        from .brain_gemini import GeminiBrain
+
+        return GeminiBrain(cfg, web=web)
+    return Brain(cfg, web=web)
+
+
 class Brain:
     def __init__(self, cfg: Config, web: bool = False):
         self.cfg = cfg

@@ -489,7 +489,7 @@
     } catch { /* Standardwerte */ }
     if (status.password_required && !password) await askPassword();
 
-    pill("#sys-brain", status.brain_ok, status.brain_ok ? `Modell: ${status.model}` : "ANTHROPIC_API_KEY fehlt");
+    pill("#sys-brain", status.brain_ok, status.brain_ok ? `Gehirn: ${status.model}` : "API-Key fehlt");
     pill("#sys-voice", status.voice === "elevenlabs", status.voice === "elevenlabs" ? "ElevenLabs" : "Browserstimme (kein ElevenLabs-Key)");
     pill("#sys-mic", recog.supported, recog.supported ? "Spracheingabe verfügbar" : "Spracheingabe nur in Chrome/Edge");
 
@@ -498,7 +498,7 @@
 
     addMessage("jarvis", greeting());
     if (!status.brain_ok) {
-      addMessage("jarvis", "Hinweis: Mir fehlt noch der Anthropic-API-Key. Tragen Sie ihn in die Datei .env ein und starten Sie mich neu.", "error");
+      addMessage("jarvis", "Hinweis: Mir fehlt noch mein API-Key (kostenlos: GEMINI_API_KEY von aistudio.google.com). Bitte eintragen und mich neu starten.", "error");
     }
     loadFiles();
     setState("idle");

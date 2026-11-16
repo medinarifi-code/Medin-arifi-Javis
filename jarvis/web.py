@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .brain import Brain
+from .brain import create_brain
 from .config import load_config
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -52,7 +52,7 @@ async def check_password(request: Request, call_next):
 
 class Session:
     def __init__(self):
-        self.brain = Brain(cfg, web=True)
+        self.brain = create_brain(cfg, web=True)
         self.lock = threading.Lock()
 
 
@@ -87,8 +87,8 @@ class SessionRequest(BaseModel):
 def status():
     return {
         "user_name": cfg.user_name,
-        "model": cfg.model,
-        "brain_ok": bool(cfg.anthropic_api_key),
+        "model": cfg.brain_label,
+        "brain_ok": cfg.brain_ready,
         "voice": "elevenlabs" if cfg.elevenlabs_api_key else "browser",
         "language": cfg.language,
         "password_required": bool(WEB_PASSWORD),
@@ -107,8 +107,8 @@ def chat(req: ChatRequest):
             events.put(None)
             return
         try:
-            if not cfg.anthropic_api_key:
-                events.put({"type": "text", "text": "Mir fehlt der Anthropic-API-Key. Bitte tragen Sie ihn in der Datei .env ein und starten Sie mich neu."})
+            if not cfg.brain_ready:
+                events.put({"type": "text", "text": f"Mir fehlt noch mein Zugangsschlüssel: {cfg.missing_key_hint} Bitte eintragen und mich neu starten."})
                 return
             session.brain.ask(
                 req.text,

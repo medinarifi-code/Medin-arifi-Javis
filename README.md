@@ -2,7 +2,7 @@
 
 Ein Sprachassistent wie bei Iron Man: Du redest mit JARVIS, und er antwortet mit einer natürlichen Stimme. Er kann alles, was eine normale KI kann (Fragen beantworten, erklären, Texte schreiben, programmieren, übersetzen, im Internet suchen), und er kann **Dateien erstellen**: PowerPoint (.pptx), Word (.docx), Excel (.xlsx), Code, Textdateien und mehr.
 
-- **Gehirn:** Claude (Anthropic API, Modell `claude-opus-5-5`)
+- **Gehirn:** **Google Gemini (kostenlos)** oder Claude von Anthropic (kostenpflichtig, sehr stark)
 - **Stimme:** ElevenLabs. JARVIS fängt schon mit dem ersten Satz an zu sprechen, während der Rest der Antwort noch entsteht.
 - **Ohren:** Mikrofon mit deutscher Spracherkennung
 - **Oberfläche:** Als **Webseite** im Browser (mit animiertem Arc Reactor) oder im Terminal
@@ -18,7 +18,8 @@ Wichtig: Beim Installieren das Häkchen **„Add Python to PATH“** setzen.
 ### 2. API-Keys besorgen
 | Dienst | Wofür | Wo |
 |---|---|---|
-| **Anthropic** (Pflicht) | Das Gehirn | <https://console.anthropic.com> → *API Keys* → *Create Key* (Guthaben aufladen nötig) |
+| **Google Gemini** (kostenlos) | Das Gehirn | <https://aistudio.google.com> → *Get API key* → *Create API key* |
+| *oder* **Anthropic** (kostenpflichtig) | Das Gehirn (Claude) | <https://console.anthropic.com> → *API Keys* → *Create Key* (Guthaben aufladen nötig) |
 | **ElevenLabs** (empfohlen) | Die realistische Stimme | <https://elevenlabs.io> → Profil unten links → *API Keys* |
 
 ### 3. JARVIS starten
@@ -31,7 +32,7 @@ Beim ersten Start wird alles automatisch installiert, danach öffnet sich die Da
 Trage dort deine Keys ein:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+GEMINI_API_KEY=AIza...
 ELEVENLABS_API_KEY=sk_...
 JARVIS_USER_NAME=Sir
 ```
@@ -48,7 +49,8 @@ JARVIS läuft dann auf einem Server bei **Render** und ist über einen echten Li
 2. Im Render-Dashboard oben rechts auf **„+ New“** → **„Blueprint“** tippen.
 3. Bei GitHub den Zugriff auf das Repository **Medin-arifi-Javis** erlauben und es auswählen.
 4. Render liest die Datei `render.yaml` und fragt nach diesen Werten:
-   - `ANTHROPIC_API_KEY`: dein Anthropic-Key
+   - `GEMINI_API_KEY`: dein kostenloser Google-Key (von aistudio.google.com)
+   - `ANTHROPIC_API_KEY`: **leer lassen** (nur falls du Claude bezahlen möchtest)
    - `ELEVENLABS_API_KEY`: dein ElevenLabs-Key (für die Stimme)
    - `JARVIS_WEB_PASSWORD`: **ein Passwort, das du dir ausdenkst.** Damit kann niemand außer dir dein API-Guthaben verbrauchen.
    - `JARVIS_USER_NAME`: wie JARVIS dich nennen soll, z. B. `Sir`
@@ -111,7 +113,9 @@ Ohne ElevenLabs-Key benutzt JARVIS automatisch die Windows-Systemstimme.
 
 ## Fehlerbehebung
 - **„Kein Mikrofon“:** In Windows unter *Einstellungen → Datenschutz → Mikrofon* den Zugriff für Desktop-Apps erlauben. Falls `PyAudio` sich nicht installieren lässt: `.venv\Scripts\pip install pipwin && .venv\Scripts\pipwin install pyaudio`.
-- **„Zugangsschlüssel wird abgelehnt“:** Den Anthropic-Key in `.env` prüfen und ob auf dem Konto Guthaben ist.
+- **„Zugangsschlüssel wird abgelehnt“:** Den Key in `.env` bzw. bei Render prüfen (bei Anthropic auch, ob Guthaben da ist).
+- **„Kostenloses Kontingent ausgeschöpft“:** Gemini erlaubt kostenlos nur eine begrenzte Zahl an Anfragen pro Minute und Tag. Kurz warten.
+- **Gemini-Modell wechseln:** `GEMINI_MODEL` setzen (z. B. `gemini-2.5-flash`). Standard ist automatisch das neueste Flash-Modell.
 - **ElevenLabs-Fehler (401/quota):** Key prüfen oder Kontingent aufgebraucht. Im kostenlosen Tarif sind die Zeichen pro Monat begrenzt.
 - **Webseite: kein Ton:** Einmal irgendwo auf die Seite klicken. Browser spielen Ton erst nach einer Interaktion ab. Prüfe außerdem den Schalter „Stimme“.
 - **Webseite: Mikrofon geht nicht:** Chrome oder Edge verwenden (Firefox unterstützt keine Spracheingabe) und den Zugriff über das Schloss-Symbol in der Adressleiste erlauben.

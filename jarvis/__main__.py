@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 
 from . import hud
-from .brain import Brain
+from .brain import create_brain
 from .config import load_config
 from .ears import create_ears
 from .voice import SentenceBuffer, create_voice
@@ -87,16 +87,16 @@ def main() -> None:
     cfg = load_config()
     voice, voice_info = create_voice(cfg, args.mute)
     ears, ears_info = (None, "deaktiviert (--text)") if args.text else create_ears(cfg.language)
-    brain = Brain(cfg)
+    brain = create_brain(cfg)
 
     hud.boot([
-        ("Neuronales Kernsystem", cfg.model, bool(cfg.anthropic_api_key)),
+        ("Neuronales Kernsystem", cfg.brain_label, cfg.brain_ready),
         ("Sprachsynthese", voice_info, voice_info.startswith("ElevenLabs")),
         ("Audiosensoren", ears_info, ears is not None),
         ("Dateisystem", str(cfg.output_dir), True),
     ])
-    if not cfg.anthropic_api_key:
-        hud.warn("ANTHROPIC_API_KEY fehlt. Bitte in der Datei .env eintragen (siehe README).")
+    if not cfg.brain_ready:
+        hud.warn(cfg.missing_key_hint + " Bitte in der Datei .env eintragen (siehe README).")
     hud.help_panel(ears is not None, args.conversation)
 
     speaker = Speaker(voice)
