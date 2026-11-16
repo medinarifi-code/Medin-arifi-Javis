@@ -29,15 +29,20 @@ cfg = load_config()
 app = FastAPI(title="J.A.R.V.I.S.", docs_url=None, redoc_url=None)
 
 _imap_box = None
+_imap_key = None
 
 
 def imap_mailbox():
-    """Gemeinsames IMAP-Postfach aus MAIL_ADDRESS/MAIL_APP_PASSWORD (oder None)."""
-    global _imap_box
-    if _imap_box is None and cfg.imap_enabled:
+    """Gemeinsames IMAP-Postfach aus MAIL_ADDRESS/MAIL_APP_PASSWORD (oder None). Wirft MailError bei falscher Einrichtung."""
+    global _imap_box, _imap_key
+    if not cfg.imap_enabled:
+        return None
+    key = (cfg.mail_address, cfg.mail_password, cfg.mail_imap_host, cfg.mail_smtp_host)
+    if _imap_box is None or _imap_key != key:
         from .mail.imap import ImapMailbox
 
-        _imap_box = ImapMailbox(cfg.mail_address, cfg.mail_password, cfg.mail_imap_host, cfg.mail_smtp_host)
+        _imap_box = ImapMailbox(*key)  # Fehler werden nicht zwischengespeichert
+        _imap_key = key
     return _imap_box
 
 
@@ -201,8 +206,32 @@ def mail_status(session: str, request: Request):
             result.update(connected=True, provider="outlook", address=auth.address, token=auth.export())
             return result
     if cfg.imap_enabled:
-        result.update(connected=True, provider="imap", address=cfg.mail_address)
+        try:
+            box = imap_mailbox()
+            result.update(connected=True, provider="imap", address=box.address)
+        except MailError as e:
+            result.update(provider="imap", address=cfg.mail_address, error=str(e))
     return result
+
+
+@app.post("/api/mail/test")
+def mail_test(body: SessionBody, request: Request):
+    """Prüft, ob die Anmeldung am Postfach wirklich klappt."""
+    s = get_session(body.session)
+    _restore_outlook(s, request)
+    try:
+        box = s.mailbox()
+        if box is None:
+            return {"ok": False, "message": "Es ist noch kein Postfach eingerichtet."}
+        if hasattr(box, "test"):
+            return {"ok": True, "message": box.test()}
+        box.list(limit=1)
+        return {"ok": True, "message": f"Verbunden – Postfach {box.address} ist erreichbar."}
+    except MailError as e:
+        return {"ok": False, "message": str(e)}
+    except Exception as e:  # noqa: BLE001
+        log.exception("Mail-Test fehlgeschlagen")
+        return {"ok": False, "message": f"Unerwarteter Fehler: {type(e).__name__}: {e}"}
 
 
 @app.post("/api/mail/outlook/start")

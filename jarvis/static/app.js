@@ -258,6 +258,20 @@
     const s = mailState;
     body.innerHTML = "";
     const p = (html) => { const el = document.createElement("div"); el.innerHTML = html; body.append(el); return el; };
+    const testButton = () => {
+      const el = p('<div class="row"><button class="secondary" id="mail-test">Verbindung testen</button></div><p id="mail-test-result"></p>');
+      el.querySelector("#mail-test").onclick = async (e) => {
+        const out = el.querySelector("#mail-test-result");
+        e.target.disabled = true; out.className = ""; out.textContent = "Teste …";
+        try {
+          const r = await fetch("/api/mail/test", { method: "POST", headers: headers({ "Content-Type": "application/json" }), body: JSON.stringify({ session: sessionId }) });
+          const j = await r.json();
+          out.className = j.ok ? "ok" : "error";
+          out.textContent = (j.ok ? "✓ " : "✕ ") + j.message;
+        } catch { out.className = "error"; out.textContent = "✕ Server nicht erreichbar"; }
+        e.target.disabled = false;
+      };
+    };
     if (s.connected) {
       const el = p('<p class="ok">✓ Verbunden</p><p></p><p>Frag einfach: „Habe ich neue Mails?“, „Lies mir die Mail von … vor“ oder „Antworte ihm, dass …“.</p>');
       el.querySelectorAll("p")[1].textContent = s.address + (s.provider === "outlook" ? " (Outlook)" : "");
@@ -268,6 +282,7 @@
           store.set("jarvis-mail-token", null); await loadMail(); renderMail();
         };
       }
+      testButton();
       return;
     }
     if (s.pending) {
@@ -282,6 +297,13 @@
       };
       return;
     }
+    if (s.provider === "imap" && s.error) {
+      const el = p('<p class="error"></p><p></p>');
+      el.querySelectorAll("p")[0].textContent = "Problem mit der E-Mail-Einrichtung:";
+      el.querySelectorAll("p")[1].textContent = s.error;
+      testButton();
+      return;
+    }
     if (s.error) p('<p class="error"></p>').querySelector("p").textContent = "Anmeldung fehlgeschlagen: " + s.error;
     if (s.outlook_available) {
       const el = p('<p>Verbinde dein Outlook-/Hotmail-Postfach. Dein Passwort gibst du nur bei Microsoft ein.</p><div class="row"><button class="primary" id="ol-start">Outlook verbinden</button></div>');
@@ -294,7 +316,7 @@
     } else {
       p(`<p>Noch kein Postfach eingerichtet. So geht's (bei Render → <b>Environment</b>):</p>
         <ul class="steps"><li><b>Outlook/Hotmail:</b> <code>MS_CLIENT_ID</code> eintragen (Anleitung im README).</li>
-        <li><b>Gmail/GMX/Web.de:</b> <code>MAIL_ADDRESS</code> und <code>MAIL_APP_PASSWORD</code> eintragen.</li></ul>`);
+        <li><b>iCloud/Gmail/GMX/Web.de:</b> <code>MAIL_ADDRESS</code> und <code>MAIL_APP_PASSWORD</code> (App-Passwort) eintragen.</li></ul>`);
     }
   }
 

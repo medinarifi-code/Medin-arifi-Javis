@@ -155,3 +155,23 @@ def test_mail_status(monkeypatch, tmp_path):
     s = c.get("/api/mail/status?session=abcdefgh1").json()
     assert s["connected"] and s["provider"] == "imap" and s["address"] == "ich@gmail.com"
     assert c.post("/api/mail/outlook/start", json={"session": "abcdefgh1"}).status_code == 400
+
+
+def test_mail_status_shows_setup_error_and_test(monkeypatch, tmp_path):
+    c = client(monkeypatch, tmp_path, password="")
+    monkeypatch.setattr(server.cfg, "mail_address", "medin")  # ohne @icloud.com
+    monkeypatch.setattr(server.cfg, "mail_password", "pw")
+    s = c.get("/api/mail/status?session=abcdefgh2").json()
+    assert s["connected"] is False and "ganze E-Mail-Adresse" in s["error"]
+    r = c.post("/api/mail/test", json={"session": "abcdefgh2"}).json()
+    assert r["ok"] is False and "ganze E-Mail-Adresse" in r["message"]
+
+    class OkBox:
+        address = "medin@icloud.com"
+
+        def test(self):
+            return "Verbunden – Postfach medin@icloud.com ist erreichbar."
+
+    monkeypatch.setattr(server, "imap_mailbox", lambda: OkBox())
+    r = c.post("/api/mail/test", json={"session": "abcdefgh2"}).json()
+    assert r["ok"] is True and "erreichbar" in r["message"]

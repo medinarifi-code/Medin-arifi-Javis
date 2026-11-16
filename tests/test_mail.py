@@ -83,12 +83,14 @@ def _raw(subject="Hallo", sender="Max <max@firma.de>", body="Wie geht's?"):
 
 
 class FakeIMAP:
-    def __init__(self, host, timeout=None):
-        self.host = host
+    accept_user = None  # None = jeder Benutzername
+
+    def __init__(self, host, port=993, timeout=None):
+        self.host, self.port = host, port
         self.literal = None
 
     def login(self, user, pw):
-        if pw != "apppw":
+        if pw != "apppw" or (FakeIMAP.accept_user and user != FakeIMAP.accept_user):
             raise imap_mod.imaplib.IMAP4.error("AUTHENTICATIONFAILED")
 
     def select(self, box, readonly=False):
@@ -142,11 +144,6 @@ def test_imap_mailbox(monkeypatch):
         imap_mod.ImapMailbox("ich@gmail.com", "falsch").list()
 
 
-def test_unknown_domain_needs_hosts():
-    with pytest.raises(Exception, match="MAIL_IMAP_HOST"):
-        imap_mod.ImapMailbox("a@unbekannt.xyz", "pw")
-
-
 # ---------------------------------------------------------------- Outlook (simuliert)
 class FakeAuth:
     address = "ich@outlook.com"
@@ -189,3 +186,39 @@ def test_token_cache_encryption():
     blob = encrypt_cache('{"a": 1}', "geheim", "client")
     assert decrypt_cache(blob, "geheim", "client") == '{"a": 1}'
     assert decrypt_cache(blob, "anders", "client") is None
+
+
+# ---------------------------------------------------------------- Adresse, iCloud, Server-Erkennung
+def test_clean_address():
+    from jarvis.mail.imap import clean_address
+    for raw in [" Name@iCloud.com ", '"name@icloud.com".', "mailto:<name@icloud.com>", "na\u200bme@icloud.com\u00a0"]:
+        assert clean_address(raw).lower() == "name@icloud.com"
+    with pytest.raises(Exception, match="ganze E-Mail-Adresse"):
+        clean_address("name")
+
+
+def test_icloud_login_falls_back_to_username(monkeypatch):
+    monkeypatch.setattr(imap_mod.imaplib, "IMAP4_SSL", FakeIMAP)
+    monkeypatch.setattr(FakeIMAP, "accept_user", "medin")
+    box = imap_mod.ImapMailbox(" medin@icloud.com ", "apppw")
+    assert (box.imap_host, box.imap_port, box.smtp_host, box.smtp_port) == ("imap.mail.me.com", 993, "smtp.mail.me.com", 587)
+    assert "erreichbar" in box.test() and box._user == "medin"
+    bad = imap_mod.ImapMailbox("medin@icloud.com", "falsch")
+    with pytest.raises(Exception, match="app-spezifisches Passwort"):
+        bad.test()
+
+
+def test_microsoft_address_points_to_outlook_button():
+    with pytest.raises(Exception, match="Outlook verbinden"):
+        imap_mod.ImapMailbox("name@hotmail.de", "pw")
+
+
+def test_discover_unknown_domain():
+    xml = b"""<clientConfig><emailProvider id="x"><domain>firma.ch</domain>
+      <incomingServer type="imap"><hostname>imap.%EMAILDOMAIN%</hostname><port>993</port><socketType>SSL</socketType></incomingServer>
+      <outgoingServer type="smtp"><hostname>smtp.anbieter.ch</hostname><port>587</port><socketType>STARTTLS</socketType></outgoingServer>
+      </emailProvider></clientConfig>"""
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, content=xml)))
+    assert imap_mod.discover("firma.ch", http) == ("imap.firma.ch:993", "smtp.anbieter.ch:587")
+    none = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
+    assert imap_mod.discover("schule-xy.de", none) == ("imap.schule-xy.de", "smtp.schule-xy.de:465")

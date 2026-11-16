@@ -55,6 +55,17 @@ Microsoft verlangt dafür eine eigene „App-Registrierung“. Das musst du nur 
 
 GMX/Web.de funktionieren genauso. Dort in den Einstellungen unter **„POP3/IMAP Abruf“** den Zugriff erlauben und dein normales Passwort oder App-Passwort nehmen.
 
+## 3C. E-Mail: iCloud verbinden (@icloud.com, @me.com, @mac.com)
+1. Am iPhone: **Einstellungen → [dein Name] → Anmelden & Sicherheit**. Die **Zwei-Faktor-Authentifizierung** muss an sein.
+2. Auf <https://account.apple.com> (früher appleid.apple.com) anmelden → **Anmelden und Sicherheit** → **App-spezifische Passwörter** → **+** → Name `JARVIS` → **Erstellen**
+3. Das Passwort kopieren (Format `abcd-efgh-ijkl-mnop`). **Nicht** dein normales Apple-Passwort!
+4. Bei Render → **Environment**:
+   - `MAIL_ADDRESS` = deine **ganze** Adresse, z. B. `name@icloud.com` (ohne Leerzeichen)
+   - `MAIL_APP_PASSWORD` = das app-spezifische Passwort
+5. In JARVIS: ✉️ → **„Verbindung testen“**. Bei ✓ ist alles fertig.
+
+Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. Klappt es nicht, bei Render zusätzlich `MAIL_IMAP_HOST` und `MAIL_SMTP_HOST` eintragen (z. B. `imap.firma.de` und `smtp.firma.de:465`).
+
 ---
 
 ## So benutzt du JARVIS
