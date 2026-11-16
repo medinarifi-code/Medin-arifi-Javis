@@ -69,7 +69,10 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
 ---
 
 ## So benutzt du JARVIS
-- **Zwei Bereiche** (oben umschalten):
+- **Command Center:** Startseite im Iron-Man-Look mit animiertem 3D-Kern, AI-Core-Status, Live-Feed deiner Aktionen,
+  Schnellbefehlen, echter Server-Auslastung (CPU/RAM/Speicher), deinen Dateien und dem E-Mail-Status.
+  **TALK TO JARVIS** unten startet sofort das Sprechen, **⚡ Tagesbriefing** fasst Datum, Wetter, Nachrichten und Mails zusammen.
+- **Bereiche** (Seitenleiste am PC, Leiste unten am Handy):
   - **💬 Schreiben:** normaler Chat. 🎙️ diktiert in das Eingabefeld, du kannst den Text vor dem Senden noch ändern. 🔊 oben lässt Antworten vorlesen.
   - **🎙️ Sprechen:** großer Sprach-Bildschirm. Auf die leuchtende Kugel tippen und reden, JARVIS antwortet mit Stimme und hört danach automatisch weiter zu (abschaltbar). ⏹ Stopp beendet.
   - Beide Bereiche teilen dasselbe Gespräch. Was du gesprochen hast, steht auch im Chat.

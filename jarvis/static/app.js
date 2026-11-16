@@ -13,7 +13,7 @@
   let sessionId = store.get("jarvis-session") || newId();
   store.set("jarvis-session", sessionId);
   let busy = false;
-  let mode = store.get("jarvis-mode", "write") === "speak" ? "speak" : "write";
+  let mode = ["dash", "write", "speak"].includes(store.get("jarvis-mode")) ? store.get("jarvis-mode") : "dash";
 
   const headers = (extra = {}) => {
     const h = { ...extra };
@@ -26,20 +26,22 @@
 
   // ------------------------------------------------------------ Anzeige
   const log = $("#log"), input = $("#input");
+  const STATE_HERO = { listening: "HÖRT ZU", thinking: "DENKT NACH", speaking: "SPRICHT" };
   function setState(text, cls = "") {
-    $("#state").textContent = text;
+    document.querySelectorAll("[data-state-text]").forEach((el) => { el.textContent = text; });
+    $("#hero-state").textContent = "v2.0 · " + (STATE_HERO[cls] || "BEREIT");
     document.body.classList.remove("listening", "thinking", "speaking");
     if (cls) document.body.classList.add(cls);
     if (mode === "speak") {
       const big = { listening: "Ich höre zu …", thinking: "Ich denke nach …", speaking: "JARVIS spricht …" }[cls];
-      $("#sp-state").textContent = big || (busy ? "…" : "Tippe auf die Kugel und sprich");
+      $("#sp-state").textContent = big || (busy ? "…" : "Tippe auf den Kern und sprich");
     }
   }
   function refresh() {
     if (recog.active) setState("Hört zu …", "listening");
     else if (busy) setState(voice.active ? "Spricht …" : "Denkt nach …", voice.active ? "speaking" : "thinking");
     else if (voice.active) setState("Spricht …", "speaking");
-    else setState(mailState.connected ? `Bereit · ✉ ${mailState.address}` : "Bereit");
+    else setState("Bereit");
   }
   const scroll = () => {
     log.scrollTop = log.scrollHeight;
@@ -282,6 +284,8 @@
     const sentences = new Sentences();
     const close = () => { el?.classList.remove("streaming"); el = null; };
     const spExtra = $("#sp-extra");
+    feed("💬", text || "Datei gesendet", "Befehl an JARVIS", "info");
+    msgCount++; renderBadges();
     $("#sp-user").textContent = text || "📎";
     $("#sp-answer").textContent = ""; $("#sp-status").textContent = ""; spExtra.innerHTML = "";
 
@@ -292,10 +296,10 @@
         $("#sp-answer").textContent += ev.text;
         sentences.feed(ev.text).forEach((s) => voice.say(s));
       } else if (ev.type === "status") { close(); status(ev.text); $("#sp-status").textContent = "⟳ " + ev.text + " …"; }
-      else if (ev.type === "file") { close(); fileCard(ev.name, ev.url); fileCard(ev.name, ev.url, spExtra); }
-      else if (ev.type === "mail_sent") { close(); mailCard(ev); mailCard(ev, spExtra); }
+      else if (ev.type === "file") { close(); fileCard(ev.name, ev.url); fileCard(ev.name, ev.url, spExtra); feed(fileIcon(ev.name), ev.name, "Datei erstellt", "ok"); }
+      else if (ev.type === "mail_sent") { close(); mailCard(ev); mailCard(ev, spExtra); feed("✉️", "Mail an " + ev.to, ev.subject || "Gesendet", "ok"); }
       else if (ev.type === "mail_token") { store.set("jarvis-mail-token", ev.token); }
-      else if (ev.type === "error") { close(); bubble("jarvis", ev.text, "error"); $("#sp-answer").textContent = ev.text; }
+      else if (ev.type === "error") { close(); bubble("jarvis", ev.text, "error"); $("#sp-answer").textContent = ev.text; feed("⚠️", ev.text, "Fehler", "err"); }
     };
 
     try {
@@ -323,6 +327,7 @@
       sentences.flush().forEach((s) => voice.say(s));
       close(); busy = false; $("#send").disabled = false; $("#sp-status").textContent = "";
       refresh(); if (!voice.active) listenAgain();
+      loadFiles();
     }
   }
 
@@ -345,7 +350,8 @@
       mailState = await r.json();
       if (mailState.token) store.set("jarvis-mail-token", mailState.token);
     } catch { /* offline */ }
-    $("#mail-dot").classList.toggle("on", !!mailState.connected);
+    document.querySelectorAll("[data-mail-dot]").forEach((d) => d.classList.toggle("on", !!mailState.connected));
+    renderMailPanel(); renderCore();
     refresh();
     return mailState;
   }
@@ -425,18 +431,262 @@
     }, 3000);
   }
 
+  // ============================================================ HUD / Command Center
+  let msgCount = 0, fileCount = 0;
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const fmtTime = (ts) => new Date(ts).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const fileIcon = (name) => {
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    return { pptx: "📊", docx: "📝", xlsx: "📈", pdf: "📕", png: "🖼️", jpg: "🖼️", jpeg: "🖼️", webp: "🖼️", mp3: "🔊", zip: "📦" }[ext] || "📄";
+  };
+
+  // Live-Feed: echte Aktionen dieser Sitzung (im Browser gespeichert)
+  function feedItems() { try { return JSON.parse(store.get("jarvis-feed", "[]")) || []; } catch { return []; } }
+  function feed(icon, title, sub, tag) {
+    const items = feedItems();
+    items.unshift({ icon, title: String(title).slice(0, 140), sub, tag, ts: Date.now() });
+    store.set("jarvis-feed", JSON.stringify(items.slice(0, 30)));
+    renderFeed();
+  }
+  function renderFeed() {
+    const ul = $("#feed"); if (!ul) return;
+    const items = feedItems();
+    const tags = { info: "INFO", ok: "DONE", warn: "WARN", err: "ERROR" };
+    ul.innerHTML = items.length ? items.map((i) => `<li><span class="fi">${esc(i.icon)}</span><div class="ft"><b>${esc(i.title)}</b><small>${esc(i.sub)} · ${fmtTime(i.ts)}</small></div><span class="tag ${esc(i.tag)}">${tags[i.tag] || "INFO"}</span></li>`).join("")
+      : '<li class="empty">Noch keine Aktivität. Gib JARVIS einen Befehl – alles erscheint hier live.</li>';
+  }
+
+  // Dateien
+  async function loadFiles() {
+    try {
+      const r = await fetch("/api/files", { headers: headers() });
+      if (!r.ok) return;
+      const files = await r.json();
+      fileCount = files.length;
+      const row = (f) => {
+        const ext = (f.name.split(".").pop() || "").toLowerCase();
+        const cls = ["png", "jpg", "jpeg", "webp", "gif"].includes(ext) ? "img" : ext;
+        const when = new Date(f.time * 1000).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+        return `<li><span class="fx ${esc(cls)}">${esc(ext.toUpperCase().slice(0, 4))}</span><div class="fn"><b>${esc(f.name)}</b><small>${f.upload ? "Hochgeladen" : "Erstellt"} · ${when} · ${Math.max(1, Math.round(f.size / 1024))} KB</small></div><a href="${esc(withKey(f.url))}" download="${esc(f.name)}">Laden</a></li>`;
+      };
+      const empty = '<li class="empty">Noch keine Dateien – lass JARVIS etwas erstellen.</li>';
+      $("#dash-files").innerHTML = files.length ? files.slice(0, 5).map(row).join("") : empty;
+      $("#files-list").innerHTML = files.length ? files.map(row).join("") : empty;
+      renderBadges(); renderCore();
+    } catch { /* offline */ }
+  }
+  function renderBadges() {
+    const bm = $("#badge-msgs"), bf = $("#badge-files");
+    bm.hidden = !msgCount; bm.textContent = msgCount;
+    bf.hidden = !fileCount; bf.textContent = fileCount;
+  }
+
+  // AI-Core-Übersicht (echte Zustände)
+  function renderCore() {
+    const ul = $("#core-list"); if (!ul) return;
+    const srOk = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const rows = [
+      ["🧠", "AI Core", info.ai_ready ? "Groq · Aktiv" : "API-Key fehlt", info.ai_ready],
+      ["🎙️", "Voice", srOk ? "Mikrofon & Stimme bereit" : "Nur Stimme (Browser)", srOk],
+      ["✉️", "E-Mail", mailState.connected ? mailState.address : "Nicht verbunden", !!mailState.connected],
+      ["🗂️", "Dateien", `${fileCount} gespeichert`, true],
+      ["💬", "Gespräch", `${msgCount} Befehle in dieser Sitzung`, true],
+      ["🛡️", "Sicherheit", info.needs_password ? "Passwortschutz aktiv" : "Lokal (ohne Passwort)", true],
+    ];
+    ul.innerHTML = rows.map(([i, t, sub, on]) => `<li><span class="ci">${i}</span><div><b>${esc(t)}</b><small class="${on ? "on" : "off"}">${esc(sub)}</small></div></li>`).join("");
+  }
+  function renderMailPanel() {
+    const s = mailState;
+    $("#mail-title").textContent = s.connected ? "Verbunden" : s.error ? "Problem" : "Nicht verbunden";
+    $("#mail-sub").textContent = s.connected ? s.address : s.error ? "Tippe auf Verbindung" : "Tippe auf Verbindung";
+    $("#dock-mail").textContent = s.connected ? s.address : "nicht verbunden";
+  }
+
+  // Systemmonitor (echte Server-Auslastung)
+  async function loadSystem() {
+    try {
+      const r = await fetch("/api/system", { headers: headers() });
+      if (!r.ok) return;
+      const d = await r.json();
+      const set = (id, v) => { const ring = $(id + " .ring"); ring.style.setProperty("--p", v ?? 0); ring.querySelector("b").textContent = v == null ? "–" : Math.round(v) + "%"; };
+      set("#g-cpu", d.cpu); set("#g-ram", d.ram); set("#g-disk", d.disk);
+      const high = (d.cpu ?? 0) > 85 || (d.ram ?? 0) > 90;
+      const st = $("#sys-text");
+      st.classList.toggle("warn", high);
+      st.innerHTML = `<i class="led"></i>${high ? "AUSGELASTET" : "OPTIMAL"}`;
+    } catch { /* offline */ }
+  }
+
+  // Uhr
+  function tick() {
+    const d = new Date();
+    $("#time").textContent = d.toLocaleTimeString("de-DE");
+    $("#date").textContent = d.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  }
+
+  // ---------- Animierter 3D-Kern (Canvas) ----------
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const levelNow = () => parseFloat(document.documentElement.style.getPropertyValue("--level")) || 0;
+  const tint = () => (document.body.classList.contains("listening") ? [255, 197, 66] : [56, 225, 255]);
+
+  class Globe {
+    constructor(canvas) {
+      this.c = canvas; this.ctx = canvas.getContext("2d"); this.kind = canvas.dataset.size || "hero";
+      this.rot = Math.random() * 6; this.pts = [];
+      const latStep = this.kind === "hero" ? 12 : 15, lonStep = this.kind === "hero" ? 7 : 9;
+      for (let lat = -84; lat <= 84; lat += latStep)
+        for (let lon = 0; lon < 360; lon += lonStep) {
+          const a = lat * Math.PI / 180, b = lon * Math.PI / 180;
+          this.pts.push([Math.cos(a) * Math.cos(b), Math.sin(a), Math.cos(a) * Math.sin(b)]);
+        }
+      this.nodes = Array.from({ length: 26 }, () => {
+        const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+        return [r * Math.cos(th), u, r * Math.sin(th)];
+      });
+      const fit = () => {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2), r = this.c.getBoundingClientRect();
+        this.w = r.width; this.h = r.height;
+        this.c.width = Math.max(1, r.width * dpr); this.c.height = Math.max(1, r.height * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      };
+      fit(); new ResizeObserver(fit).observe(this.c);
+    }
+    project(p, cy, sy, cx, sx) { // Drehung um y, dann leichte Neigung um x
+      const x = p[0] * cy - p[2] * sy, z = p[0] * sy + p[2] * cy;
+      const y = p[1] * cx - z * sx, z2 = p[1] * sx + z * cx;
+      return [x, y, z2];
+    }
+    draw(t) {
+      if (!this.c.offsetParent || !this.w) return;
+      const g = this.ctx, w = this.w, h = this.h, [r0, g0, b0] = tint();
+      const col = (a) => `rgba(${r0},${g0},${b0},${a})`;
+      const thinking = document.body.classList.contains("thinking");
+      const lvl = levelNow();
+      this.rot += reduceMotion ? 0 : (thinking ? 0.014 : 0.0035);
+      const R = Math.min(w, h) * (this.kind === "hero" ? 0.33 : 0.4) * (1 + lvl * 0.07);
+      const cx0 = w / 2, cy0 = h / 2 - (this.kind === "hero" ? h * 0.02 : 0);
+      g.clearRect(0, 0, w, h);
+      // Leuchten
+      const glow = g.createRadialGradient(cx0, cy0, R * 0.1, cx0, cy0, R * 1.6);
+      glow.addColorStop(0, col(0.28 + lvl * 0.2)); glow.addColorStop(0.45, col(0.08)); glow.addColorStop(1, col(0));
+      g.fillStyle = glow; g.fillRect(0, 0, w, h);
+      // Boden-Ringe
+      if (this.kind === "hero") {
+        for (let i = 0; i < 4; i++) {
+          g.beginPath(); g.ellipse(cx0, cy0 + R * 1.18, R * (0.7 + i * 0.25), R * (0.12 + i * 0.04), 0, 0, Math.PI * 2);
+          g.strokeStyle = col(0.35 - i * 0.07); g.lineWidth = 1; g.stroke();
+        }
+      }
+      const cyr = Math.cos(this.rot), syr = Math.sin(this.rot), cxr = Math.cos(0.38), sxr = Math.sin(0.38);
+      // Gitterpunkte
+      for (const p of this.pts) {
+        const [x, y, z] = this.project(p, cyr, syr, cxr, sxr);
+        const a = 0.12 + 0.75 * ((z + 1) / 2);
+        g.fillStyle = col(a);
+        const s = z > 0 ? 1.7 : 1.1;
+        g.fillRect(cx0 + x * R - s / 2, cy0 + y * R - s / 2, s, s);
+      }
+      // Netzwerk-Knoten mit Verbindungen
+      const proj = this.nodes.map((p) => this.project(p, cyr, syr, cxr, sxr));
+      g.lineWidth = 0.7;
+      for (let i = 0; i < proj.length; i++) for (let j = i + 1; j < proj.length; j++) {
+        const a = proj[i], b = proj[j];
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+        if (d < 0.75 && a[2] > -0.2 && b[2] > -0.2) {
+          g.strokeStyle = col(0.25 * (1 - d / 0.75)); g.beginPath();
+          g.moveTo(cx0 + a[0] * R, cy0 + a[1] * R); g.lineTo(cx0 + b[0] * R, cy0 + b[1] * R); g.stroke();
+        }
+      }
+      for (const [x, y, z] of proj) if (z > -0.1) {
+        g.fillStyle = col(0.9); g.beginPath(); g.arc(cx0 + x * R, cy0 + y * R, 2.2, 0, Math.PI * 2); g.fill();
+        g.fillStyle = col(0.2); g.beginPath(); g.arc(cx0 + x * R, cy0 + y * R, 6, 0, Math.PI * 2); g.fill();
+      }
+      // Umlaufbahnen mit Satelliten
+      const orbits = [[1.45, 0.32, -0.35, 0.0009], [1.7, 0.22, 0.25, -0.0006], [1.25, 0.5, 1.2, 0.0012]];
+      orbits.forEach(([rx, ry, ang, sp], i) => {
+        g.save(); g.translate(cx0, cy0); g.rotate(ang);
+        g.beginPath(); g.ellipse(0, 0, R * rx, R * rx * ry, 0, 0, Math.PI * 2);
+        g.strokeStyle = col(0.28); g.lineWidth = 1; g.stroke();
+        const ph = (reduceMotion ? i : t * sp * (thinking ? 3 : 1)) + i * 2;
+        const px = Math.cos(ph) * R * rx, py = Math.sin(ph) * R * rx * ry;
+        g.fillStyle = col(1); g.shadowColor = col(1); g.shadowBlur = 12;
+        g.beginPath(); g.arc(px, py, 2.6, 0, Math.PI * 2); g.fill();
+        g.restore();
+      });
+      // Kern
+      const core = g.createRadialGradient(cx0, cy0, 0, cx0, cy0, R * 0.35);
+      core.addColorStop(0, col(0.35 + lvl * 0.4)); core.addColorStop(1, col(0));
+      g.fillStyle = core; g.beginPath(); g.arc(cx0, cy0, R * 0.35, 0, Math.PI * 2); g.fill();
+    }
+  }
+
+  class Wave {
+    constructor(canvas) {
+      this.c = canvas; this.ctx = canvas.getContext("2d");
+      this.n = canvas.classList.contains("mini") ? 44 : canvas.classList.contains("wide") ? 60 : 36;
+      const fit = () => {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2), r = this.c.getBoundingClientRect();
+        this.w = r.width; this.h = r.height;
+        this.c.width = Math.max(1, r.width * dpr); this.c.height = Math.max(1, r.height * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      };
+      fit(); new ResizeObserver(fit).observe(this.c);
+    }
+    draw(t) {
+      if (!this.c.offsetParent || !this.w) return;
+      const g = this.ctx, w = this.w, h = this.h, [r0, g0, b0] = tint(), b = document.body.classList;
+      const amp = b.contains("listening") ? 0.85 : b.contains("speaking") ? 0.45 + levelNow() * 0.6 : b.contains("thinking") ? 0.35 : 0.12;
+      g.clearRect(0, 0, w, h);
+      const bw = w / this.n;
+      for (let i = 0; i < this.n; i++) {
+        const env = Math.sin((i / (this.n - 1)) * Math.PI);
+        const v = reduceMotion ? 0.3 : (Math.sin(t / 180 + i * 0.7) * 0.5 + 0.5) * (Math.sin(t / 97 + i * 1.3) * 0.5 + 0.5);
+        const bh = Math.max(2, h * (0.08 + amp * env * (0.25 + v * 0.75)));
+        const grd = g.createLinearGradient(0, h / 2 - bh / 2, 0, h / 2 + bh / 2);
+        grd.addColorStop(0, `rgba(${r0},${g0},${b0},0.15)`); grd.addColorStop(0.5, `rgba(${r0},${g0},${b0},0.95)`); grd.addColorStop(1, `rgba(${r0},${g0},${b0},0.15)`);
+        g.fillStyle = grd;
+        g.fillRect(i * bw + bw * 0.2, h / 2 - bh / 2, bw * 0.6, bh);
+      }
+    }
+  }
+
+  let hudStarted = false;
+  function startHud() {
+    if (hudStarted) return;
+    hudStarted = true;
+    const fx = [...document.querySelectorAll("#app canvas.globe")].map((c) => new Globe(c))
+      .concat([...document.querySelectorAll("canvas.wave")].map((c) => new Wave(c)));
+    let last = 0;
+    const loop = (t) => {
+      if (!document.hidden && t - last > 33) { last = t; fx.forEach((f) => f.draw(t)); } // ~30 Bilder/s
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    tick(); setInterval(tick, 1000);
+    setInterval(() => { if (mode === "dash" && !document.hidden) loadSystem(); }, 10000);
+  }
+  function startLoginGlobe() {
+    const c = document.querySelector("#login canvas.globe");
+    if (!c) return;
+    const gl = new Globe(c);
+    const loop = (t) => { if ($("#login").hidden) return; gl.draw(t); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+
   // ------------------------------------------------------------ Anmeldung & Start
-  function showLogin() { $("#app").hidden = true; $("#login").hidden = false; $("#login-pw").focus(); }
+  function showLogin() { $("#app").hidden = true; $("#login").hidden = false; $("#login-pw").focus(); startLoginGlobe(); }
   async function showApp() {
     $("#login").hidden = true; $("#app").hidden = false;
     $("#hello").textContent = `Hallo ${info.user_name || ""}, wie kann ich helfen?`.replace(" ,", ",");
     if (!info.ai_ready) bubble("jarvis", "Mir fehlt noch der kostenlose GROQ_API_KEY (console.groq.com). Bitte bei Render unter Environment eintragen.", "error");
+    $("#user-name").textContent = info.user_name || "Operator";
+    $("#dock-ai").textContent = info.ai_ready ? "Groq · online" : "Key fehlt";
     $("#btn-voice").setAttribute("aria-pressed", store.get("jarvis-voice", "0") === "1" ? "true" : "false");
+    renderFeed(); renderCore(); loadFiles(); loadSystem(); startHud();
     $("#sp-auto").checked = store.get("jarvis-auto", "1") === "1";
     setMode(mode, false);
     await loadMail();
     if (mailState.pending) startPolling();
-    input.focus();
   }
 
   $("#login-form").addEventListener("submit", async (e) => {
@@ -474,37 +724,49 @@
   });
   // ------------------------------------------------------------ Bereiche umschalten
   function setMode(m, startListening = true) {
+    const changed = mode !== m;
     mode = m;
     store.set("jarvis-mode", m);
-    $("#tab-write").setAttribute("aria-selected", String(m === "write"));
-    $("#tab-speak").setAttribute("aria-selected", String(m === "speak"));
-    $("#view-write").hidden = m !== "write";
-    $("#view-speak").hidden = m !== "speak";
+    ["dash", "write", "speak"].forEach((v) => { $("#view-" + v).hidden = v !== m; });
+    document.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === m));
     document.body.classList.toggle("mode-speak", m === "speak");
-    recog.abort(); voice.stop();
+    if (changed || !startListening) { recog.abort(); voice.stop(); }
     refresh();
-    if (m === "speak" && startListening) recog.start();  // Antippen des Reiters zählt als Erlaubnis fürs Mikrofon
-    if (m === "write") input.focus();
+    if (m === "speak" && startListening) recog.start();  // Antippen zählt als Erlaubnis fürs Mikrofon
+    if (m === "write" && matchMedia("(min-width: 901px)").matches) input.focus();
+    if (m === "dash") { loadSystem(); loadFiles(); }
   }
-  $("#tab-write").addEventListener("click", () => mode !== "write" && setMode("write"));
-  $("#tab-speak").addEventListener("click", () => mode !== "speak" && setMode("speak"));
   $("#sp-orb").addEventListener("click", () => (recog.active ? recog.stop() : voice.active ? voice.stop() : recog.start()));
   $("#sp-stop").addEventListener("click", () => { recog.abort(); voice.stop(); refresh(); });
   $("#sp-auto").addEventListener("change", (e) => { store.set("jarvis-auto", e.target.checked ? "1" : "0"); if (!e.target.checked) recog.abort(); });
-  $("#btn-new").addEventListener("click", newChat);
-  $("#btn-mail").addEventListener("click", async () => { await loadMail(); renderMail(); dlg.showModal(); });
   $("#mail-close").addEventListener("click", () => dlg.close());
+  $("#files-close").addEventListener("click", () => $("#files-dialog").close());
   $("#attach").addEventListener("click", () => $("#file").click());
   $("#file").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
   input.addEventListener("paste", (e) => { if (e.clipboardData?.files?.length) { e.preventDefault(); addFiles(e.clipboardData.files); } });
   window.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); document.body.classList.add("dragging"); } });
   window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
   window.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); document.body.classList.remove("dragging"); addFiles(e.dataTransfer.files); } });
-  document.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => {
-    if (c.dataset.attach) { $("#file").click(); return; }
-    const q = c.dataset.q;
-    if (q.endsWith(" ")) { input.value = q; input.focus(); grow(); } else send(q);
-  }));
+  // Zentrale Klick-Steuerung für Navigation, Schnellbefehle usw.
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-view], [data-open], [data-action], [data-q], [data-attach]");
+    if (!t || t.closest("#login")) return;
+    if (t.dataset.view) { setMode(t.dataset.view, t.dataset.view === "speak"); return; }
+    if (t.dataset.open === "mail") { await loadMail(); renderMail(); dlg.showModal(); return; }
+    if (t.dataset.open === "files") { await loadFiles(); $("#files-dialog").showModal(); return; }
+    if (t.dataset.action === "new") { newChat(); return; }
+    if (t.dataset.action === "talk") {
+      if (mode !== "speak") setMode("speak");
+      else if (recog.active) recog.stop(); else if (voice.active) voice.stop(); else recog.start();
+      return;
+    }
+    if (t.dataset.attach) { if (mode !== "write") setMode("write", false); $("#file").click(); return; }
+    if (t.dataset.q) {
+      const q = t.dataset.q;
+      if (mode === "dash") setMode("write", false);
+      if (q.endsWith(" ")) { input.value = q; input.focus(); grow(); } else send(q);
+    }
+  });
 
   init();
 })();

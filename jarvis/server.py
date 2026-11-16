@@ -6,6 +6,9 @@ import asyncio
 import json
 import logging
 import mimetypes
+import os
+import shutil
+import time
 import queue
 import secrets
 import threading
@@ -26,6 +29,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 MAX_SESSIONS = 30
 
 cfg = load_config()
+START_TIME = time.time()
 app = FastAPI(title="J.A.R.V.I.S.", docs_url=None, redoc_url=None)
 
 _imap_box = None
@@ -276,6 +280,45 @@ def outlook_disconnect(body: SessionBody):
     if auth is not None:
         auth.disconnect()
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- Dashboard-Daten
+@app.get("/api/files")
+def list_files():
+    """Zuletzt erstellte/hochgeladene Dateien (für das Dashboard)."""
+    root = cfg.output_dir.resolve()
+    files = sorted((p for p in root.rglob("*") if p.is_file() and not p.name.endswith(".office.png")),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    return [{"name": p.name, "path": p.relative_to(root).as_posix(), "url": f"/files/{p.relative_to(root).as_posix()}",
+             "size": p.stat().st_size, "time": int(p.stat().st_mtime),
+             "upload": p.relative_to(root).parts[0] == "uploads"} for p in files[:40]]
+
+
+def _cpu_percent() -> float | None:
+    try:
+        return round(min(100.0, os.getloadavg()[0] / (os.cpu_count() or 1) * 100), 1)
+    except (AttributeError, OSError):
+        return None
+
+
+def _ram_percent() -> float | None:
+    try:
+        info = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                key, value = line.split(":", 1)
+                info[key] = int(value.split()[0])
+        return round(100 * (1 - info["MemAvailable"] / info["MemTotal"]), 1)
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+@app.get("/api/system")
+def system():
+    """Echte Auslastung des Servers (CPU-Last, Arbeitsspeicher, Speicherplatz)."""
+    disk = shutil.disk_usage(cfg.output_dir)
+    return {"cpu": _cpu_percent(), "ram": _ram_percent(), "disk": round(100 * disk.used / disk.total, 1),
+            "uptime": int(time.time() - START_TIME), "sessions": len(_sessions)}
 
 
 # --------------------------------------------------------------------------- Dateien

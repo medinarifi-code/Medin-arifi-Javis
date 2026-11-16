@@ -229,3 +229,16 @@ def test_chat_endpoint_with_attachment(monkeypatch, tmp_path):
     r = c.post("/api/chat", json={"session": "abcdefgh3", "text": "x", "attachments": [{"name": "virus.exe", "data": "data:application/octet-stream;base64,AAAA"}]})
     evs = [json.loads(l) for l in r.text.splitlines() if l]
     assert evs[0]["type"] == "error" and "nicht unterstützt" in evs[0]["text"]
+
+
+def test_dashboard_endpoints(monkeypatch, tmp_path):
+    c = client(monkeypatch, tmp_path, password="pw123")
+    (tmp_path / "uploads").mkdir()
+    (tmp_path / "uploads" / "foto.jpg").write_bytes(b"x")
+    (tmp_path / "Bericht.pdf").write_bytes(b"%PDF")
+    assert c.get("/api/files").status_code == 401
+    files = c.get("/api/files", headers={"X-Jarvis-Key": "pw123"}).json()
+    assert {f["path"] for f in files} == {"uploads/foto.jpg", "Bericht.pdf"}
+    assert next(f for f in files if f["name"] == "foto.jpg")["upload"] is True
+    sysinfo = c.get("/api/system", headers={"X-Jarvis-Key": "pw123"}).json()
+    assert 0 <= sysinfo["disk"] <= 100 and "cpu" in sysinfo and "ram" in sysinfo
