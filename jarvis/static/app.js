@@ -126,8 +126,10 @@
   }
 
   // ---------- Stimme ----------
+  // ElevenLabs-Audio wird satzweise geladen, dekodiert und über Web Audio abgespielt.
+  // Das funktioniert auch auf dem iPhone, sobald der Ton einmal per Fingertipp freigeschaltet wurde.
   const voice = {
-    queue: [],          // [{text, prev, audio}]
+    queue: [],          // [{text, prev, buffer: Promise<AudioBuffer|null>}]
     current: null,
     active: false,
     lastText: "",
@@ -135,44 +137,54 @@
     browserVoice: null,
 
     enabled() { return voiceToggle.checked; },
+    useEleven() { return status.voice === "elevenlabs" && this.ctx && this.ctx.state === "running"; },
 
     say(text) {
       text = cleanForSpeech(text);
       if (!text || !this.enabled()) return;
       this.queue.push({ text, prev: this.lastText });
       this.lastText = text;
+      this.prefetch();
       this.pump();
     },
 
+    prefetch() {
+      // Den laufenden und die nächsten zwei Sätze parallel vorbereiten -> keine Pausen zwischen Sätzen.
+      for (const item of this.queue.slice(0, 2)) this.prepare(item);
+    },
+
     prepare(item) {
-      if (item.audio || status.voice !== "elevenlabs") return;
-      const a = new Audio();
-      a.preload = "auto";
-      a.src = withKey(`/api/tts?text=${encodeURIComponent(item.text)}&prev=${encodeURIComponent(item.prev.slice(-300))}`);
-      item.audio = a;
+      if (item.buffer || !this.useEleven()) return;
+      const url = withKey(`/api/tts?text=${encodeURIComponent(item.text)}&prev=${encodeURIComponent(item.prev.slice(-300))}`);
+      item.buffer = fetch(url)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .then((ab) => (ab ? new Promise((res, rej) => this.ctx.decodeAudioData(ab, res, rej)) : null))
+        .catch(() => null);
     },
 
     pump() {
-      if (this.current || !this.queue.length) {
-        if (!this.current && !this.queue.length) this.finished();
-        return;
-      }
+      if (this.current) return;
+      if (!this.queue.length) { this.finished(); return; }
       this.active = true;
       refreshState();
       const item = this.queue.shift();
       this.current = item;
       this.prepare(item);
-      if (this.queue[0]) this.prepare(this.queue[0]);   // nächsten Satz schon vorladen
+      this.prefetch();
       const done = () => { if (this.current === item) { this.current = null; this.pump(); } };
 
-      if (item.audio) {
-        this.connect(item.audio);
-        item.audio.onended = done;
-        item.audio.onerror = () => { this.speakBrowser(item.text, done); };
-        item.audio.play().catch(() => this.speakBrowser(item.text, done));
-      } else {
-        this.speakBrowser(item.text, done);
-      }
+      if (!item.buffer) { this.speakBrowser(item.text, done); return; }
+      item.buffer.then((buf) => {
+        if (this.current !== item) return;               // inzwischen gestoppt
+        if (!buf) { this.speakBrowser(item.text, done); return; }
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(this.analyser);
+        src.onended = done;
+        item.source = src;
+        src.start();
+        this.trackLevel();
+      });
     },
 
     speakBrowser(text, done) {
@@ -181,7 +193,7 @@
       u.lang = status.language || "de-DE";
       if (!this.browserVoice) {
         const voices = speechSynthesis.getVoices().filter((v) => v.lang.startsWith("de"));
-        this.browserVoice = voices.find((v) => /natural|online|neural/i.test(v.name)) || voices[0] || null;
+        this.browserVoice = voices.find((v) => /natural|online|neural|premium|enhanced/i.test(v.name)) || voices[0] || null;
       }
       if (this.browserVoice) u.voice = this.browserVoice;
       u.rate = 1.05;
@@ -191,25 +203,21 @@
     },
 
     unlock() {
-      // AudioContext muss innerhalb einer Nutzeraktion entstehen, sonst bleibt er stumm.
+      // Muss innerhalb einer Nutzeraktion (Klick/Tippen) passieren, sonst bleibt der Ton stumm.
       try {
+        if (navigator.audioSession) navigator.audioSession.type = "playback"; // iPhone: auch bei Stummschalter hörbar
         if (!this.ctx) {
           this.ctx = new (window.AudioContext || window.webkitAudioContext)();
           this.analyser = this.ctx.createAnalyser();
           this.analyser.fftSize = 256;
           this.analyser.connect(this.ctx.destination);
+          // kurzer stiller Ton schaltet Audio auf iOS frei
+          const b = this.ctx.createBuffer(1, 1, 22050);
+          const s = this.ctx.createBufferSource();
+          s.buffer = b; s.connect(this.ctx.destination); s.start(0);
         }
-        if (this.ctx.state === "suspended") this.ctx.resume();
-      } catch { /* optional */ }
-    },
-
-    connect(audio) {
-      try {
-        if (!this.ctx || this.ctx.state !== "running") { this.fakeLevel(true); return; }
-        const src = this.ctx.createMediaElementSource(audio);
-        src.connect(this.analyser);
-        this.trackLevel();
-      } catch { /* Visualisierung ist optional */ }
+        if (this.ctx.state !== "running") this.ctx.resume();
+      } catch { /* dann eben Browserstimme */ }
     },
 
     trackLevel() {
@@ -237,13 +245,9 @@
 
     stop() {
       this.queue = [];
-      if (this.current && this.current.audio) {
-        const a = this.current.audio;
-        a.onended = a.onerror = null;
-        a.pause();
-        a.removeAttribute("src");
-      }
+      const cur = this.current;
       this.current = null;
+      if (cur && cur.source) { cur.source.onended = null; try { cur.source.stop(); } catch { /* schon zu Ende */ } }
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       this.lastText = "";
       this.finished();
@@ -502,7 +506,7 @@
   }
 
   // Browser erlauben Ton erst nach einer Interaktion -> Begrüßung beim ersten Klick/Tastendruck sprechen.
-  ["pointerdown", "keydown"].forEach((evt) =>
+  ["pointerdown", "keydown", "touchend", "click"].forEach((evt) =>
     window.addEventListener(evt, () => voice.unlock(), { capture: true }));
   window.addEventListener("pointerdown", (e) => {
     // Begrüßung nur sprechen, wenn der erste Klick nicht schon Mikrofon/Eingabe startet

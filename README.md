@@ -40,6 +40,28 @@ Speichern, Editor schließen, und JARVIS fährt hoch.
 
 ---
 
+## 🌐 Online stellen (eigener Link, auch fürs Handy)
+
+JARVIS läuft dann auf einem Server bei **Render** und ist über einen echten Link erreichbar, z. B. `https://jarvis-xxxx.onrender.com`. Dein PC muss dafür nicht an sein.
+
+1. Auf <https://render.com> ein kostenloses Konto erstellen: **„Sign up with GitHub“** wählen.
+2. Im Render-Dashboard oben rechts auf **„+ New“** → **„Blueprint“** tippen.
+3. Bei GitHub den Zugriff auf das Repository **Medin-arifi-Javis** erlauben und es auswählen.
+4. Render liest die Datei `render.yaml` und fragt nach diesen Werten:
+   - `ANTHROPIC_API_KEY`: dein Anthropic-Key
+   - `ELEVENLABS_API_KEY`: dein ElevenLabs-Key (für die Stimme)
+   - `JARVIS_WEB_PASSWORD`: **ein Passwort, das du dir ausdenkst.** Damit kann niemand außer dir dein API-Guthaben verbrauchen.
+   - `JARVIS_USER_NAME`: wie JARVIS dich nennen soll, z. B. `Sir`
+5. **„Apply“** / **„Deploy Blueprint“** tippen und ca. 3–5 Minuten warten.
+6. Unter **Dashboard → jarvis** steht oben dein Link. Öffne ihn und gib dein Passwort ein. Fertig!
+
+**Als App auf dem iPhone:** Den Link in **Safari** öffnen → Teilen-Symbol □↑ → **„Zum Home-Bildschirm“**. JARVIS hat dann ein eigenes App-Symbol.
+
+Hinweise:
+- Im kostenlosen Tarif schläft der Server nach 15 Minuten ohne Benutzung ein. Der erste Aufruf danach dauert ca. 1 Minute.
+- Erstellte Dateien direkt herunterladen. Beim Neustart des Servers werden sie gelöscht.
+- Keys oder Passwort ändern: Render → jarvis → **Environment**.
+
 ## Bedienung der Webseite
 
 | Aktion | So geht's |

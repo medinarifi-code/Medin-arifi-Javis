@@ -7,6 +7,7 @@ Wiedergabe der ElevenLabs-Stimme und die Downloads der erstellten Dateien.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import mimetypes
 import os
@@ -39,7 +40,8 @@ WEB_PASSWORD = os.getenv("JARVIS_WEB_PASSWORD") or ""
 async def check_password(request: Request, call_next):
     if WEB_PASSWORD and request.url.path.startswith(("/api/", "/files/")) and request.url.path != "/api/status":
         given = request.headers.get("x-jarvis-key") or request.query_params.get("key") or ""
-        if not secrets.compare_digest(given, WEB_PASSWORD):
+        if not secrets.compare_digest(given.encode(), WEB_PASSWORD.encode()):
+            await asyncio.sleep(1.5)  # bremst Passwort-Raten aus
             return JSONResponse({"error": "Passwort erforderlich"}, status_code=401)
     return await call_next(request)
 
@@ -218,19 +220,24 @@ def main() -> None:
     parser.add_argument("--lan", action="store_true",
                         help="Im Heimnetz erreichbar machen (z.B. vom Handy). Erfordert JARVIS_WEB_PASSWORD in .env")
     parser.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch öffnen")
+    parser.add_argument("--cloud", action="store_true",
+                        help="Betrieb auf einem Online-Server (Render & Co.): Port aus $PORT, Passwort Pflicht")
     args = parser.parse_args()
 
     host = "127.0.0.1"
-    if args.lan:
+    if args.lan or args.cloud:
         if not WEB_PASSWORD:
-            raise SystemExit("Für --lan bitte zuerst JARVIS_WEB_PASSWORD in der Datei .env setzen.")
+            raise SystemExit("Bitte zuerst JARVIS_WEB_PASSWORD setzen - sonst könnte jeder Ihr API-Guthaben verbrauchen.")
         host = "0.0.0.0"
+    if args.cloud:
+        args.port = int(os.getenv("PORT", args.port))
+        args.no_browser = True
 
     url = f"http://localhost:{args.port}"
     print(f"\n  J.A.R.V.I.S. ist online:  {url}\n  (Beenden mit Strg+C)\n")
     if not args.no_browser:
         threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=host, port=args.port, log_level="warning")
+    uvicorn.run(app, host=host, port=args.port, log_level="warning", proxy_headers=True, forwarded_allow_ips="*")
 
 
 if __name__ == "__main__":
