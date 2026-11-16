@@ -13,6 +13,7 @@
   let sessionId = store.get("jarvis-session") || newId();
   store.set("jarvis-session", sessionId);
   let busy = false;
+  let mode = store.get("jarvis-mode", "write") === "speak" ? "speak" : "write";
 
   const headers = (extra = {}) => {
     const h = { ...extra };
@@ -27,7 +28,12 @@
   const log = $("#log"), input = $("#input");
   function setState(text, cls = "") {
     $("#state").textContent = text;
-    document.body.className = cls;
+    document.body.classList.remove("listening", "thinking", "speaking");
+    if (cls) document.body.classList.add(cls);
+    if (mode === "speak") {
+      const big = { listening: "Ich höre zu …", thinking: "Ich denke nach …", speaking: "JARVIS spricht …" }[cls];
+      $("#sp-state").textContent = big || (busy ? "…" : "Tippe auf die Kugel und sprich");
+    }
   }
   function refresh() {
     if (recog.active) setState("Hört zu …", "listening");
@@ -35,7 +41,11 @@
     else if (voice.active) setState("Spricht …", "speaking");
     else setState(mailState.connected ? `Bereit · ✉ ${mailState.address}` : "Bereit");
   }
-  const scroll = () => { log.scrollTop = log.scrollHeight; };
+  const scroll = () => {
+    log.scrollTop = log.scrollHeight;
+    const talk = document.querySelector(".sp-talk");
+    if (talk) talk.scrollTop = talk.scrollHeight;
+  };
   function hideWelcome() { $("#welcome")?.remove(); }
 
   function bubble(who, text, cls = "") {
@@ -52,7 +62,7 @@
     el.textContent = "⟳ " + text + " …";
     log.append(el); scroll();
   }
-  function fileCard(name, url) {
+  function fileCard(name, url, target = log) {
     const ext = (name.split(".").pop() || "").toLowerCase();
     if (["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(ext)) {
       const card = document.createElement("div");
@@ -65,7 +75,7 @@
       card.querySelector(".title").textContent = name;
       const dl = card.querySelector(".dl"); dl.href = src; dl.download = name;
       card.querySelector("img").onload = scroll;
-      log.append(card); scroll();
+      target.append(card); scroll();
       return;
     }
     const el = document.createElement("div");
@@ -75,16 +85,16 @@
     el.querySelector(".badge").classList.add(ext);
     el.querySelector(".title").textContent = name;
     const a = el.querySelector("a"); a.href = withKey(url); a.download = name;
-    log.append(el); scroll();
+    target.append(el); scroll();
   }
-  function mailCard(ev) {
+  function mailCard(ev, target = log) {
     const el = document.createElement("div");
     el.className = "card mail-card";
     el.innerHTML = '<div class="sent"></div><div class="title"></div><pre></pre>';
     el.querySelector(".sent").textContent = "✓ Gesendet an " + ev.to;
     el.querySelector(".title").textContent = ev.subject || "";
     el.querySelector("pre").textContent = ev.text || "";
-    log.append(el); scroll();
+    target.append(el); scroll();
   }
 
   // ------------------------------------------------------------ Stimme (kostenlose Browserstimme)
@@ -109,7 +119,7 @@
   }
   const voice = {
     active: false, pending: 0, chosen: null, raf: 0,
-    on() { return $("#btn-voice").getAttribute("aria-pressed") === "true"; },
+    on() { return mode === "speak" || $("#btn-voice").getAttribute("aria-pressed") === "true"; },
     pick() {
       if (this.chosen || !("speechSynthesis" in window)) return this.chosen;
       const de = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("de"));
@@ -167,17 +177,23 @@
           if (e.results[i].isFinal) this.text += e.results[i][0].transcript;
           else interim += e.results[i][0].transcript;
         }
-        $("#interim").textContent = (this.text + " " + interim).trim();
+        const live = (this.text + " " + interim).trim();
+        if (mode === "speak") { $("#sp-user").textContent = live; $("#sp-answer").textContent = ""; }
+        else $("#interim").textContent = live;
       };
       r.onerror = (e) => {
         if (e.error === "not-allowed" || e.error === "service-not-allowed") {
           bubble("jarvis", "Kein Zugriff aufs Mikrofon. Bitte in den Browser-Einstellungen erlauben.", "error");
-          setConv(false);
+          $("#sp-auto").checked = false;
         }
       };
       r.onend = () => {
         this.active = false; this.r = null; $("#interim").textContent = "";
         const t = this.text.trim(); refresh();
+        if (mode === "write") {  // Schreiben: Diktat landet im Eingabefeld, du kannst es noch ändern
+          if (t) { input.value = (input.value ? input.value.trimEnd() + " " : "") + t; grow(); input.focus(); }
+          return;
+        }
         if (t) send(t); else listenAgain();
       };
       this.r = r; this.active = true; refresh();
@@ -186,8 +202,7 @@
     stop() { this.r?.stop(); },
     abort() { if (this.r) { this.text = ""; this.r.abort(); } },
   };
-  const convOn = () => $("#btn-conv").getAttribute("aria-pressed") === "true";
-  function setConv(on) { $("#btn-conv").setAttribute("aria-pressed", String(on)); store.set("jarvis-conv", on ? "1" : "0"); }
+  const convOn = () => mode === "speak" && $("#sp-auto").checked;
   function listenAgain() {
     if (convOn() && !busy && !voice.active && !recog.active) setTimeout(() => { if (convOn() && !busy && !voice.active && !recog.active) recog.start(); }, 400);
   }
@@ -266,17 +281,21 @@
     let el = null;
     const sentences = new Sentences();
     const close = () => { el?.classList.remove("streaming"); el = null; };
+    const spExtra = $("#sp-extra");
+    $("#sp-user").textContent = text || "📎";
+    $("#sp-answer").textContent = ""; $("#sp-status").textContent = ""; spExtra.innerHTML = "";
 
     const handle = (ev) => {
       if (ev.type === "text") {
         if (!el) el = bubble("jarvis", "", "streaming");
         el.textContent += ev.text; scroll();
+        $("#sp-answer").textContent += ev.text;
         sentences.feed(ev.text).forEach((s) => voice.say(s));
-      } else if (ev.type === "status") { close(); status(ev.text); }
-      else if (ev.type === "file") { close(); fileCard(ev.name, ev.url); }
-      else if (ev.type === "mail_sent") { close(); mailCard(ev); }
+      } else if (ev.type === "status") { close(); status(ev.text); $("#sp-status").textContent = "⟳ " + ev.text + " …"; }
+      else if (ev.type === "file") { close(); fileCard(ev.name, ev.url); fileCard(ev.name, ev.url, spExtra); }
+      else if (ev.type === "mail_sent") { close(); mailCard(ev); mailCard(ev, spExtra); }
       else if (ev.type === "mail_token") { store.set("jarvis-mail-token", ev.token); }
-      else if (ev.type === "error") { close(); bubble("jarvis", ev.text, "error"); }
+      else if (ev.type === "error") { close(); bubble("jarvis", ev.text, "error"); $("#sp-answer").textContent = ev.text; }
     };
 
     try {
@@ -302,7 +321,7 @@
       close(); bubble("jarvis", "Verbindung unterbrochen. " + (e.message || ""), "error");
     } finally {
       sentences.flush().forEach((s) => voice.say(s));
-      close(); busy = false; $("#send").disabled = false;
+      close(); busy = false; $("#send").disabled = false; $("#sp-status").textContent = "";
       refresh(); if (!voice.active) listenAgain();
     }
   }
@@ -412,8 +431,9 @@
     $("#login").hidden = true; $("#app").hidden = false;
     $("#hello").textContent = `Hallo ${info.user_name || ""}, wie kann ich helfen?`.replace(" ,", ",");
     if (!info.ai_ready) bubble("jarvis", "Mir fehlt noch der kostenlose GROQ_API_KEY (console.groq.com). Bitte bei Render unter Environment eintragen.", "error");
-    $("#btn-voice").setAttribute("aria-pressed", store.get("jarvis-voice", "1") === "1" ? "true" : "false");
-    setConv(store.get("jarvis-conv") === "1");
+    $("#btn-voice").setAttribute("aria-pressed", store.get("jarvis-voice", "0") === "1" ? "true" : "false");
+    $("#sp-auto").checked = store.get("jarvis-auto", "1") === "1";
+    setMode(mode, false);
     await loadMail();
     if (mailState.pending) startPolling();
     input.focus();
@@ -452,7 +472,25 @@
     e.currentTarget.setAttribute("aria-pressed", String(on)); store.set("jarvis-voice", on ? "1" : "0");
     if (!on) voice.stop();
   });
-  $("#btn-conv").addEventListener("click", () => { setConv(!convOn()); if (convOn()) listenAgain(); else recog.abort(); });
+  // ------------------------------------------------------------ Bereiche umschalten
+  function setMode(m, startListening = true) {
+    mode = m;
+    store.set("jarvis-mode", m);
+    $("#tab-write").setAttribute("aria-selected", String(m === "write"));
+    $("#tab-speak").setAttribute("aria-selected", String(m === "speak"));
+    $("#view-write").hidden = m !== "write";
+    $("#view-speak").hidden = m !== "speak";
+    document.body.classList.toggle("mode-speak", m === "speak");
+    recog.abort(); voice.stop();
+    refresh();
+    if (m === "speak" && startListening) recog.start();  // Antippen des Reiters zählt als Erlaubnis fürs Mikrofon
+    if (m === "write") input.focus();
+  }
+  $("#tab-write").addEventListener("click", () => mode !== "write" && setMode("write"));
+  $("#tab-speak").addEventListener("click", () => mode !== "speak" && setMode("speak"));
+  $("#sp-orb").addEventListener("click", () => (recog.active ? recog.stop() : voice.active ? voice.stop() : recog.start()));
+  $("#sp-stop").addEventListener("click", () => { recog.abort(); voice.stop(); refresh(); });
+  $("#sp-auto").addEventListener("change", (e) => { store.set("jarvis-auto", e.target.checked ? "1" : "0"); if (!e.target.checked) recog.abort(); });
   $("#btn-new").addEventListener("click", newChat);
   $("#btn-mail").addEventListener("click", async () => { await loadMail(); renderMail(); dlg.showModal(); });
   $("#mail-close").addEventListener("click", () => dlg.close());

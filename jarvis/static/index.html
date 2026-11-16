@@ -38,13 +38,19 @@
         </div>
       </div>
       <div class="actions">
-        <button id="btn-voice" class="icon" aria-pressed="true" title="Stimme an/aus" aria-label="Stimme an/aus">🔊</button>
-        <button id="btn-conv" class="icon" aria-pressed="false" title="Gesprächsmodus: hört nach jeder Antwort wieder zu" aria-label="Gesprächsmodus">🔁</button>
+        <button id="btn-voice" class="icon only-write" aria-pressed="false" title="Antworten vorlesen" aria-label="Antworten vorlesen">🔊</button>
         <button id="btn-mail" class="icon" title="E-Mail" aria-label="E-Mail">✉️<span id="mail-dot" class="dot"></span></button>
         <button id="btn-new" class="icon" title="Neues Gespräch" aria-label="Neues Gespräch">＋</button>
       </div>
     </header>
 
+    <nav class="tabs" role="tablist" aria-label="Modus">
+      <button id="tab-write" class="tab" role="tab" aria-selected="true">💬 Schreiben</button>
+      <button id="tab-speak" class="tab" role="tab" aria-selected="false">🎙️ Sprechen</button>
+    </nav>
+
+    <!-- Bereich: Schreiben -->
+    <section id="view-write" class="view">
     <main id="log" class="log" aria-live="polite">
       <div id="welcome" class="welcome">
         <div class="orb big" aria-hidden="true"></div>
@@ -70,8 +76,27 @@
         <textarea id="input" rows="1" placeholder="Frag JARVIS …" aria-label="Nachricht"></textarea>
         <button type="submit" id="send" class="send" aria-label="Senden">➤</button>
       </form>
-      <button id="mic" class="mic" aria-label="Sprechen">🎙️</button>
+      <button id="mic" class="mic" aria-label="Diktieren" title="Diktieren: gesprochener Text landet im Eingabefeld">🎙️</button>
     </footer>
+    </section>
+
+    <!-- Bereich: Sprechen -->
+    <section id="view-speak" class="view speak" hidden>
+      <div class="sp-stage">
+        <button id="sp-orb" class="orb huge" aria-label="Sprechen starten oder stoppen"></button>
+        <div id="sp-state" class="sp-state">Tippe auf die Kugel und sprich</div>
+        <div id="sp-status" class="sp-status"></div>
+      </div>
+      <div class="sp-talk" aria-live="polite">
+        <p id="sp-user" class="sp-user"></p>
+        <p id="sp-answer" class="sp-answer"></p>
+        <div id="sp-extra" class="sp-extra"></div>
+      </div>
+      <div class="sp-controls">
+        <label class="switch"><input type="checkbox" id="sp-auto" checked> <span>Nach jeder Antwort weiter zuhören</span></label>
+        <button id="sp-stop" class="secondary">⏹ Stopp</button>
+      </div>
+    </section>
   </div>
 
   <!-- E-Mail-Dialog -->

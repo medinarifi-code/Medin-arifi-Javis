@@ -69,7 +69,10 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
 ---
 
 ## So benutzt du JARVIS
-- **Sprechen:** 🎙️ antippen und reden. **🔁 Gesprächsmodus:** JARVIS hört nach jeder Antwort automatisch wieder zu.
+- **Zwei Bereiche** (oben umschalten):
+  - **💬 Schreiben:** normaler Chat. 🎙️ diktiert in das Eingabefeld, du kannst den Text vor dem Senden noch ändern. 🔊 oben lässt Antworten vorlesen.
+  - **🎙️ Sprechen:** großer Sprach-Bildschirm. Auf die leuchtende Kugel tippen und reden, JARVIS antwortet mit Stimme und hört danach automatisch weiter zu (abschaltbar). ⏹ Stopp beendet.
+  - Beide Bereiche teilen dasselbe Gespräch. Was du gesprochen hast, steht auch im Chat.
 - **Mails:** „Habe ich neue Mails?“, „Was schreibt Max?“, „Antworte ihm, dass ich morgen Zeit habe“, „Schick eine Mail an lisa@web.de: …“
 - **Dateien erstellen:** „Erstelle eine Präsentation über Elektroautos mit 8 Folien“. Die Datei erscheint im Chat mit **Laden**-Knopf.
   JARVIS kann: PowerPoint, Word, Excel, **PDF**, **Diagramme**, **KI-Bilder** („Male mir ein Bild von …“), **QR-Codes**,
