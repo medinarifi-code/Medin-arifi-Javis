@@ -69,10 +69,7 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
 ---
 
 ## So benutzt du JARVIS
-- **Command Center:** Startseite im Iron-Man-Look mit animiertem 3D-Kern, AI-Core-Status, Live-Feed deiner Aktionen,
-  Schnellbefehlen, echter Server-Auslastung (CPU/RAM/Speicher), deinen Dateien und dem E-Mail-Status.
-  **TALK TO JARVIS** unten startet sofort das Sprechen, **⚡ Tagesbriefing** fasst Datum, Wetter, Nachrichten und Mails zusammen.
-- **Bereiche** (Seitenleiste am PC, Leiste unten am Handy):
+- **Bereiche** (oben umschalten):
   - **💬 Schreiben:** normaler Chat. 🎙️ diktiert in das Eingabefeld, du kannst den Text vor dem Senden noch ändern. 🔊 oben lässt Antworten vorlesen.
   - **🎙️ Sprechen:** großer Sprach-Bildschirm. Auf die leuchtende Kugel tippen und reden, JARVIS antwortet mit Stimme und hört danach automatisch weiter zu (abschaltbar). ⏹ Stopp beendet.
   - Beide Bereiche teilen dasselbe Gespräch. Was du gesprochen hast, steht auch im Chat.
@@ -85,6 +82,11 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
   Beispiele: „Was steht auf dem Foto?“, „Löse die Aufgabe auf dem Bild“, „Fasse das PDF zusammen“,
   „Mach das Foto schwarz-weiß“, „Bau das Foto in eine Präsentation ein“.
 - **Neues Gespräch:** ＋ oben rechts
+
+- **Sperre:** Bei jedem Öffnen fragt JARVIS nach dem Passwort. War die App länger als 5 Minuten im Hintergrund, sperrt sie sich automatisch. 🔒 oben sperrt sofort.
+- **Dateien löschen:** 🗑️ an jeder Datei im Chat oder im Dateien-Fenster (Ordner-Symbol oben), dort auch „Alle löschen“.
+- **Design:** schlicht und modern, passt sich automatisch an Hell- oder Dunkelmodus deines Geräts an.
+- **Wenn mal etwas hakt:** JARVIS probiert bei Problemen von selbst andere Groq-Modelle und verbindet sich automatisch neu. Klappt es trotzdem nicht, gibt es unter der Meldung einen **↻ Nochmal**-Knopf.
 
 ### Sicherheit beim Mailen
 JARVIS sendet nur, wenn **du** es in deiner Nachricht verlangst („schick“, „antworte“ …). Neue Mails gehen nur an Adressen, die du selbst nennst oder die dir geschrieben haben. Anweisungen, die in fremden Mails stehen, befolgt JARVIS nicht. Jede gesendete Mail siehst du im Chat.

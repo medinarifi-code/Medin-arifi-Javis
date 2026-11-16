@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace as NS
 
 import groq
+import pytest
 import httpx
 from fastapi.testclient import TestClient
 
@@ -19,9 +20,9 @@ def tool_chunk(index, id=None, name=None, args=None):
     return NS(choices=[NS(delta=NS(content=None, tool_calls=[tc]))])
 
 
-def err(cls, code, msg):
+def err(cls, code, msg, headers=None):
     resp = httpx.Response(code, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
-                          json={"error": {"message": msg}})
+                          json={"error": {"message": msg}}, headers=headers or {})
     return cls(msg, response=resp, body={"error": {"message": msg}})
 
 
@@ -68,30 +69,96 @@ def test_mail_tools_only_when_connected(tmp_path):
     assert j.client.chat.completions.calls[1]["messages"][0]["role"] == "system"
 
 
-def test_rate_limit_switches_model_and_errors(tmp_path):
-    j = jarvis(tmp_path, [err(groq.RateLimitError, 429, "rate limit"), [text_chunk("Hallo")],
-                          err(groq.BadRequestError, 400, "weird thing gsk_SECRET")])
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("jarvis.ai.time.sleep", sleeps.append)
+    return sleeps
+
+
+def models_used(j):
+    return [c["model"] for c in j.client.chat.completions.calls]
+
+
+def test_rate_limit_waits_then_switches(tmp_path, no_sleep):
+    j = jarvis(tmp_path, [err(groq.RateLimitError, 429, "rate limit", {"retry-after": "2"}), [text_chunk("Hallo")]])
     out = []
     j.ask("hi", out.append, lambda s: None)
-    assert out == ["Hallo"] and j.model == "llama-3.3-70b-versatile"
-    j.ask("hi2", out.append, lambda s: None)
-    assert "Statuscode 400" in out[-1] and "SECRET" not in out[-1] and len(j.history) == 2
+    assert out == ["Hallo"] and no_sleep == [2.0] and models_used(j) == ["openai/gpt-oss-120b"] * 2
+    # langes retry-after → sofort anderes Modell
+    j = jarvis(tmp_path, [err(groq.RateLimitError, 429, "rate limit", {"retry-after": "40"}), [text_chunk("Hallo")]])
+    j.ask("hi", out.append, lambda s: None)
+    assert models_used(j) == ["openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+
+
+def test_too_large_trims_then_next_model(tmp_path):
+    too_big = lambda: err(groq.APIStatusError, 413, "Request too large for model: tokens per minute (TPM)")  # noqa: E731
+    j = jarvis(tmp_path, [too_big(), too_big(), [text_chunk("ok")]])
+    for i in range(6):
+        j.history.append({"role": "user" if i % 2 == 0 else "assistant", "content": str(i)})
+    out = []
+    j.ask("neu", out.append, lambda s: None)
+    assert out == ["ok"]
+    assert models_used(j) == ["openai/gpt-oss-120b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
+    assert len(j.client.chat.completions.calls[1]["messages"]) == 2  # System + aktuelle Frage
+
+
+def test_each_question_starts_with_best_model(tmp_path):
+    j = jarvis(tmp_path, [err(groq.BadRequestError, 400, "weird"), [text_chunk("a")], [text_chunk("b")]])
+    j.ask("1", lambda t: None, lambda s: None)
+    j.ask("2", lambda t: None, lambda s: None)
+    assert models_used(j) == ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-120b"]
+
+
+def test_network_error_is_retried(tmp_path, no_sleep):
+    req = httpx.Request("POST", "https://api.groq.com")
+    j = jarvis(tmp_path, [groq.APIConnectionError(request=req), err(groq.InternalServerError, 503, "busy"), [text_chunk("da")]])
+    out = []
+    j.ask("hi", out.append, lambda s: None)
+    assert out == ["da"] and no_sleep == [1.5, 3.0]
+
+
+def test_everything_fails_gives_friendly_message(tmp_path):
+    bad = [err(groq.BadRequestError, 400, "kaputt gsk_SECRET") for _ in range(20)]
+    j = jarvis(tmp_path, bad)
+    out = []
+    j.ask("hi", out.append, lambda s: None)
+    assert out == ["Ich bin gerade etwas überlastet. Bitte versuch es in einer Minute nochmal."]
+    assert j.history == [] and "Statuscode" not in out[0]
+    calls = j.client.chat.completions.calls
+    assert "tools" in calls[0] and "tools" not in calls[-1]  # letzter Versuch ohne Werkzeuge
+    assert len(calls) <= 14
 
 
 def test_bad_key(tmp_path):
     j = jarvis(tmp_path, [err(groq.AuthenticationError, 401, "Invalid API Key")])
     out = []
     j.ask("hi", out.append, lambda s: None)
-    assert "GROQ_API_KEY wird abgelehnt" in out[0] and j.history == []
+    assert "GROQ_API_KEY wird abgelehnt" in out[0] and j.history == [] and len(j.client.chat.completions.calls) == 1
 
 
 def test_tool_use_failed_recovers(tmp_path):
     fail = lambda: err(groq.BadRequestError, 400, "tool_use_failed: Failed to call a function")  # noqa: E731
-    j = jarvis(tmp_path, [fail(), fail(), fail(), [text_chunk("ok")]])
+    j = jarvis(tmp_path, [fail(), fail(), [text_chunk("ok")]])
     out = []
     j.ask("hi", out.append, lambda s: None)
-    assert out == ["ok"] and j.tools_ok is False
-    assert "tools" not in j.client.chat.completions.calls[-1]
+    assert out == ["ok"] and models_used(j) == ["openai/gpt-oss-120b"] * 2 + ["llama-3.3-70b-versatile"]
+
+
+def test_empty_answer_tries_next_model(tmp_path):
+    j = jarvis(tmp_path, [[], [text_chunk("Hier")]])
+    out = []
+    j.ask("hi", out.append, lambda s: None)
+    assert out == ["Hier"]
+
+
+def test_old_tool_results_are_shortened(tmp_path):
+    j = jarvis(tmp_path, [[tool_chunk(0, id="r", name="list_files", args="{}")], [text_chunk("ok")]])
+    for i in range(80):
+        (tmp_path / f"datei-mit-langem-namen-{i}.txt").write_text("x")
+    j.ask("Welche Dateien?", lambda t: None, lambda s: None)
+    tool_msg = next(m for m in j.history if m["role"] == "tool")
+    assert len(tool_msg["content"]) <= 1220 and tool_msg["content"].endswith("[…gekürzt]")
 
 
 def test_search_web(tmp_path):
@@ -110,7 +177,7 @@ def test_history_is_trimmed(tmp_path):
         j.history.append({"role": "user" if i % 2 == 0 else "assistant", "content": str(i)})
     j.ask("neu", lambda t: None, lambda s: None)
     msgs = j.client.chat.completions.calls[0]["messages"]
-    assert len(msgs) <= 17 and msgs[1]["role"] == "user" and msgs[-1]["content"] == "neu"
+    assert len(msgs) <= 13 and msgs[1]["role"] == "user" and msgs[-1]["content"] == "neu"
 
 
 # ---------------------------------------------------------------- Server
@@ -242,3 +309,20 @@ def test_dashboard_endpoints(monkeypatch, tmp_path):
     assert next(f for f in files if f["name"] == "foto.jpg")["upload"] is True
     sysinfo = c.get("/api/system", headers={"X-Jarvis-Key": "pw123"}).json()
     assert 0 <= sysinfo["disk"] <= 100 and "cpu" in sysinfo and "ram" in sysinfo
+
+
+def test_delete_files(monkeypatch, tmp_path):
+    c = client(monkeypatch, tmp_path, password="pw123")
+    h = {"X-Jarvis-Key": "pw123"}
+    (tmp_path / "uploads").mkdir()
+    (tmp_path / "uploads" / "a.jpg").write_bytes(b"x")
+    (tmp_path / "b.pdf").write_bytes(b"x")
+    (tmp_path.parent / "geheim.txt").write_text("nicht löschen")
+    assert c.delete("/api/files", params={"path": "b.pdf"}).status_code == 401
+    assert c.delete("/api/files", params={"path": "b.pdf"}, headers=h).json() == {"ok": True}
+    assert not (tmp_path / "b.pdf").exists()
+    assert c.delete("/api/files", params={"path": "b.pdf"}, headers=h).status_code == 404
+    assert c.delete("/api/files", params={"path": "../geheim.txt"}, headers=h).status_code == 404
+    assert (tmp_path.parent / "geheim.txt").exists()
+    assert c.post("/api/files/delete-all", headers=h).json() == {"ok": True, "deleted": 1}
+    assert list(tmp_path.iterdir()) == []

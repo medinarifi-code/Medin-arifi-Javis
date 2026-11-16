@@ -3,214 +3,123 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>JARVIS Command Center</title>
-  <meta name="theme-color" content="#030a14">
+  <title>JARVIS</title>
+  <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b0c0f" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="icon" href="icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Exo+2:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <div class="bg" aria-hidden="true"><div class="grid"></div><div class="glow g1"></div><div class="glow g2"></div></div>
-
-  <!-- ===================== Anmeldung ===================== -->
-  <section id="login" class="login" hidden>
-    <form id="login-form" class="panel login-card">
-      <canvas class="globe" data-size="small" aria-hidden="true"></canvas>
-      <h1>J A R V I S</h1>
-      <p class="sub">COMMAND CENTER · ZUGANG</p>
-      <input id="login-pw" type="password" autocomplete="current-password" placeholder="Passwort" required>
-      <button type="submit" class="btn primary wide">Systeme starten</button>
-      <p id="login-error" class="error" hidden>Zugang verweigert – falsches Passwort</p>
+  <!-- ============ Sperrbildschirm ============ -->
+  <section id="lock" class="lock">
+    <form id="lock-form" class="lock-card" autocomplete="off">
+      <div class="orb lg" aria-hidden="true"></div>
+      <h1>JARVIS</h1>
+      <p id="lock-msg" class="muted">JARVIS startet …</p>
+      <div id="lock-fields" hidden>
+        <input id="lock-pw" type="password" autocomplete="current-password" placeholder="Passwort" aria-label="Passwort">
+        <button type="submit" class="btn primary wide">Entsperren</button>
+      </div>
+      <p id="lock-error" class="error" hidden>Falsches Passwort</p>
     </form>
   </section>
 
-  <!-- ===================== App ===================== -->
+  <!-- ============ App ============ -->
   <div id="app" class="app" hidden>
-
-    <!-- Seitenleiste (PC) -->
-    <aside class="side">
+    <header class="top">
       <div class="brand">
-        <div class="core-icon" aria-hidden="true"><span></span></div>
-        <div><div class="brand-name">JARVIS</div><div class="brand-sub">COMMAND CENTER</div></div>
+        <div class="orb sm" aria-hidden="true"></div>
+        <div class="brand-txt"><b>JARVIS</b><span id="state">Bereit</span></div>
       </div>
-      <nav class="nav" aria-label="Bereiche">
-        <button class="nav-item" data-view="dash"><span class="ni">▦</span>Command Center</button>
-        <button class="nav-item" data-view="write"><span class="ni">💬</span>Chat<span class="badge" id="badge-msgs" hidden>0</span></button>
-        <button class="nav-item" data-view="speak"><span class="ni">🎙️</span>Sprechen</button>
-        <button class="nav-item" data-open="mail"><span class="ni">✉️</span>E-Mail<span class="dot" data-mail-dot></span></button>
-        <button class="nav-item" data-open="files"><span class="ni">🗂️</span>Dateien<span class="badge" id="badge-files" hidden>0</span></button>
-        <button class="nav-item" data-action="new"><span class="ni">＋</span>Neues Gespräch</button>
-      </nav>
-      <div class="panel voice-card">
-        <div class="ptitle">VOICE STATUS</div>
-        <canvas class="wave" aria-hidden="true"></canvas>
-        <div class="vstate" data-state-text>Bereit</div>
-        <button class="mic-ring" data-action="talk" aria-label="Sprechen starten"><span>🎙️</span></button>
-        <div class="vhint">Tippe zum Sprechen</div>
+      <div class="seg" role="tablist" aria-label="Modus">
+        <button role="tab" data-view="write" aria-selected="true">Chat</button>
+        <button role="tab" data-view="speak" aria-selected="false">Sprechen</button>
       </div>
-    </aside>
+      <div class="tools">
+        <button id="btn-voice" class="ib only-write" aria-pressed="false" title="Antworten vorlesen" aria-label="Antworten vorlesen">
+          <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
+        </button>
+        <button class="ib" data-open="files" title="Dateien" aria-label="Dateien">
+          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </button>
+        <button class="ib" data-open="mail" title="E-Mail" aria-label="E-Mail">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><i id="mail-dot" class="dot"></i>
+        </button>
+        <button class="ib" data-action="new" title="Neues Gespräch" aria-label="Neues Gespräch">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button class="ib" data-action="lock" id="btn-lock" title="Sperren" aria-label="Sperren">
+          <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        </button>
+      </div>
+    </header>
 
-    <div class="main">
-      <!-- Kopfzeile -->
-      <header class="top">
-        <div class="sys-pill"><span>SYSTEM STATUS</span><b id="sys-text"><i class="led"></i>OPTIMAL</b></div>
-        <div class="clock"><div id="date">–</div><div id="time">--:--:--</div></div>
-        <div class="top-right">
-          <button id="btn-voice" class="icon-btn" aria-pressed="false" title="Antworten im Chat vorlesen" aria-label="Antworten vorlesen">🔊</button>
-          <div class="user-chip"><div><b id="user-name">Operator</b><small>Commander</small></div><span class="avatar">👤</span></div>
+    <!-- Chat -->
+    <section id="view-write" class="view write">
+      <main id="log" class="log" aria-live="polite">
+        <div id="welcome" class="welcome">
+          <div class="orb lg" aria-hidden="true"></div>
+          <h2 id="hello">Wie kann ich helfen?</h2>
+          <div class="cards">
+            <button class="sug" data-q="Habe ich neue E-Mails?"><b>📬 Neue Mails</b><span>Posteingang prüfen</span></button>
+            <button class="sug" data-q="Erstelle mir eine Präsentation über "><b>📊 Präsentation</b><span>zu einem Thema erstellen</span></button>
+            <button class="sug" data-q="Male mir ein Bild von "><b>🎨 Bild malen</b><span>mit KI</span></button>
+            <button class="sug" data-attach="1"><b>📷 Foto senden</b><span>JARVIS schaut es an</span></button>
+          </div>
         </div>
-      </header>
-
-      <!-- ===== Command Center ===== -->
-      <section id="view-dash" class="view dash">
-        <div class="panel p-core">
-          <div class="ptitle">AI CORE OVERVIEW</div>
-          <ul class="core-list" id="core-list"></ul>
-        </div>
-
-        <div class="panel p-hero">
-          <canvas class="globe" data-size="hero" aria-hidden="true"></canvas>
-          <button class="hero-text" data-action="talk" aria-label="Mit JARVIS sprechen">
-            <span class="h1">J A R V I S</span>
-            <span class="h2">AI CORE</span>
-            <span class="h3" id="hero-state">v2.0 · BEREIT</span>
+      </main>
+      <footer class="bar">
+        <div id="interim" class="interim"></div>
+        <div id="strip" class="strip" hidden></div>
+        <form id="composer" class="composer" autocomplete="off">
+          <button type="button" id="attach" class="cb" aria-label="Datei oder Foto anhängen" title="Anhängen">
+            <svg viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg>
           </button>
-        </div>
-
-        <div class="panel p-feed">
-          <div class="ptitle">LIVE INTELLIGENCE FEED <span class="live">● LIVE</span></div>
-          <ul class="feed" id="feed"></ul>
-        </div>
-
-        <div class="panel p-quick">
-          <div class="ptitle">QUICK COMMANDS</div>
-          <div class="quick">
-            <button class="qc" data-q="Habe ich neue E-Mails?"><span>📬</span>Neue Mails prüfen</button>
-            <button class="qc" data-q="Erstelle mir eine Präsentation über "><span>📊</span>Präsentation erstellen</button>
-            <button class="qc" data-q="Male mir ein Bild von "><span>🎨</span>Bild malen</button>
-            <button class="qc" data-q="Was sind die wichtigsten Nachrichten heute?"><span>📰</span>Nachrichten heute</button>
-            <button class="qc" data-q="Wie wird das Wetter heute?"><span>🌤️</span>Wetter</button>
-            <button class="qc" data-attach="1"><span>📷</span>Foto / Datei senden</button>
-          </div>
-        </div>
-
-        <div class="panel p-sys">
-          <div class="ptitle">SYSTEM MONITOR</div>
-          <div class="gauges">
-            <div class="gauge" id="g-cpu"><div class="ring"><b>–</b></div><span>CPU</span></div>
-            <div class="gauge" id="g-ram"><div class="ring"><b>–</b></div><span>RAM</span></div>
-            <div class="gauge" id="g-disk"><div class="ring"><b>–</b></div><span>DISK</span></div>
-          </div>
-        </div>
-
-        <div class="panel p-files">
-          <div class="ptitle">DATEIEN <button class="link" data-open="files">Alle ›</button></div>
-          <ul class="mini-files" id="dash-files"></ul>
-        </div>
-
-        <div class="panel p-mail">
-          <div class="ptitle">E-MAIL LINK</div>
-          <div class="mail-state"><span class="dot big" data-mail-dot></span><div><b id="mail-title">Nicht verbunden</b><small id="mail-sub">Tippe auf Verbindung</small></div></div>
-          <div class="row">
-            <button class="btn" data-q="Habe ich neue E-Mails?">Posteingang</button>
-            <button class="btn ghost" data-open="mail">Verbindung</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- ===== Chat ===== -->
-      <section id="view-write" class="view write" hidden>
-        <div class="panel chat-panel">
-          <main id="log" class="log" aria-live="polite">
-            <div id="welcome" class="welcome">
-              <h2 id="hello">Wie kann ich helfen?</h2>
-              <div class="chips">
-                <button class="chip" data-q="Habe ich neue E-Mails?">📬 Neue Mails</button>
-                <button class="chip" data-q="Erstelle mir eine Präsentation über ">📊 Präsentation</button>
-                <button class="chip" data-q="Male mir ein Bild von ">🎨 Bild malen</button>
-                <button class="chip" data-attach="1">📷 Foto/Datei</button>
-              </div>
-            </div>
-          </main>
-          <footer class="bar">
-            <div id="interim" class="interim"></div>
-            <div id="strip" class="strip" hidden></div>
-            <form id="composer" class="composer" autocomplete="off">
-              <button type="button" id="attach" class="attach" aria-label="Datei oder Foto anhängen" title="Bild oder Datei anhängen">📎</button>
-              <input type="file" id="file" multiple hidden
-                accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.json,.html,.xml,.py,.js,.css,.ics,.vcf">
-              <textarea id="input" rows="1" placeholder="Befehl an JARVIS …" aria-label="Nachricht"></textarea>
-              <button type="submit" id="send" class="send" aria-label="Senden">➤</button>
-            </form>
-            <button id="mic" class="mic" aria-label="Diktieren" title="Diktieren: Gesprochenes landet im Eingabefeld">🎙️</button>
-          </footer>
-        </div>
-      </section>
-
-      <!-- ===== Sprechen ===== -->
-      <section id="view-speak" class="view speak" hidden>
-        <div class="sp-stage">
-          <button id="sp-orb" class="sp-orb" aria-label="Sprechen starten oder stoppen">
-            <canvas class="globe" data-size="voice" aria-hidden="true"></canvas>
+          <input type="file" id="file" multiple hidden
+            accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.json,.html,.xml,.py,.js,.css,.ics,.vcf">
+          <textarea id="input" rows="1" placeholder="Nachricht an JARVIS" aria-label="Nachricht"></textarea>
+          <button type="button" id="mic" class="cb" aria-label="Diktieren" title="Diktieren">
+            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
           </button>
-          <div id="sp-state" class="sp-state">Tippe auf den Kern und sprich</div>
-          <canvas class="wave wide" aria-hidden="true"></canvas>
-          <div id="sp-status" class="sp-status"></div>
-        </div>
-        <div class="sp-talk panel" aria-live="polite">
-          <p id="sp-user" class="sp-user"></p>
-          <p id="sp-answer" class="sp-answer"></p>
-          <div id="sp-extra" class="sp-extra"></div>
-        </div>
-        <div class="sp-controls">
-          <label class="switch"><input type="checkbox" id="sp-auto" checked> <span>Nach jeder Antwort weiter zuhören</span></label>
-          <button id="sp-stop" class="btn ghost">⏹ Stopp</button>
-        </div>
-      </section>
-    </div>
+          <button type="submit" id="send" class="send" aria-label="Senden">
+            <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </form>
+        <p class="hint">JARVIS kann Fehler machen. Wichtiges bitte prüfen.</p>
+      </footer>
+    </section>
 
-    <!-- Unterleiste: PC = Dock, Handy = Navigation -->
-    <footer class="dock">
-      <div class="dock-info">
-        <div class="tile"><small>STATUS</small><b data-state-text>Bereit</b></div>
-        <div class="tile"><small>E-MAIL</small><b id="dock-mail">–</b></div>
-        <div class="tile"><small>AI</small><b id="dock-ai">Groq</b></div>
+    <!-- Sprechen -->
+    <section id="view-speak" class="view speak" hidden>
+      <button id="sp-orb" class="sp-orb" aria-label="Sprechen starten oder stoppen"><canvas aria-hidden="true"></canvas></button>
+      <div id="sp-state" class="sp-state">Tippe auf den Kreis und sprich</div>
+      <div class="sp-talk" aria-live="polite">
+        <p id="sp-user" class="sp-user"></p>
+        <p id="sp-answer" class="sp-answer"></p>
+        <div id="sp-extra" class="sp-extra"></div>
       </div>
-      <nav class="mnav" aria-label="Navigation">
-        <button class="mn" data-view="dash"><span>▦</span>Center</button>
-        <button class="mn" data-view="write"><span>💬</span>Chat</button>
-      </nav>
-      <button class="talk" data-action="talk">
-        <canvas class="wave mini" aria-hidden="true"></canvas>
-        <span class="talk-t">TALK TO JARVIS</span>
-        <small data-state-text>Bereit</small>
-      </button>
-      <nav class="mnav" aria-label="Weitere">
-        <button class="mn" data-open="mail"><span>✉️<i class="dot" data-mail-dot></i></span>Mail</button>
-        <button class="mn" data-open="files"><span>🗂️</span>Dateien</button>
-      </nav>
-      <button class="btn brief" data-q="Gib mir ein kurzes Tagesbriefing: Datum, Wetter, die wichtigsten Nachrichten und ob ich neue E-Mails habe.">⚡ Tagesbriefing</button>
-    </footer>
+      <div class="sp-controls">
+        <label class="switch"><input type="checkbox" id="sp-auto" checked><span>Weiter zuhören</span></label>
+        <button id="sp-stop" class="btn">Stopp</button>
+      </div>
+    </section>
   </div>
 
-  <!-- E-Mail-Dialog -->
+  <!-- Dialoge -->
   <dialog id="mail-dialog" class="sheet">
-    <div class="sheet-head"><h3>E-MAIL LINK</h3><button class="icon-btn" id="mail-close" aria-label="Schließen">✕</button></div>
+    <div class="sheet-head"><h3>E-Mail</h3><button class="ib" id="mail-close" aria-label="Schließen">✕</button></div>
     <div id="mail-body"></div>
   </dialog>
-
-  <!-- Dateien-Dialog -->
   <dialog id="files-dialog" class="sheet">
-    <div class="sheet-head"><h3>DATEIEN</h3><button class="icon-btn" id="files-close" aria-label="Schließen">✕</button></div>
-    <ul class="mini-files" id="files-list"></ul>
+    <div class="sheet-head"><h3>Dateien</h3><button class="ib" id="files-close" aria-label="Schließen">✕</button></div>
+    <ul id="files-list" class="files"></ul>
+    <div class="row end"><button id="files-clear" class="btn danger" hidden>Alle löschen</button></div>
   </dialog>
 
   <script src="app.js"></script>

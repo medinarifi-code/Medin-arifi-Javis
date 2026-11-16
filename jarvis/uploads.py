@@ -13,7 +13,7 @@ from .tools.files import ToolError, extract_text, rel, safe_path, unique
 
 MAX_BYTES = 8 * 1024 * 1024
 MAX_FILES = 4
-INLINE_CHARS = 12_000   # so viel Dokument-Text geht direkt an die KI
+INLINE_CHARS = 8_000   # so viel Dokument-Text geht direkt an die KI
 HISTORY_CHARS = 1_500   # so viel bleibt danach im Gesprächsverlauf
 VISION_MAX_SIDE = 1280
 

@@ -1,4 +1,4 @@
-"""Werkzeuge von JARVIS: Schemas (Gemini-tauglich) und Ausführung."""
+"""Werkzeuge von JARVIS: Schemas und Ausführung."""
 
 from __future__ import annotations
 
@@ -20,103 +20,65 @@ def obj(props: dict, required: list[str] | None = None) -> dict:
     return schema
 
 
+I = {"type": "integer"}
+N = {"type": "number"}
+B = {"type": "boolean"}
+
+# Bewusst knapp gehalten: Die Beschreibungen gehen bei jeder Frage mit (kostenloses Token-Limit!)
 FILE_TOOLS = [
-    {"name": "create_file",
-     "description": ("Erstellt jede Art von Textdatei zum Download: .txt, .md, .html (Webseiten), .css, .js, .py und anderer "
-                     "Code, .csv, .json, .xml, .svg (Vektorgrafik), .ics (Kalendertermin), .vcf (Kontakt), .bat, .yaml …"),
-     "parameters": obj({"filename": {**S, "description": "Dateiname mit Endung"},
-                        "content": {**S, "description": "Vollständiger Inhalt"}}, ["filename", "content"])},
+    {"name": "create_file", "description": "Textdatei jeder Art: txt, md, html, css, js, py, csv, json, xml, svg, ics, vcf …",
+     "parameters": obj({"filename": S, "content": S}, ["filename", "content"])},
     {"name": "create_pptx",
-     "description": ("Erstellt eine gestaltete PowerPoint-Präsentation (.pptx). Titelfolie entsteht automatisch. "
-                     "Layouts: bullets (Standard; mit image steht das Bild rechts), two_column (bullets links, right_bullets "
-                     "rechts), section (Kapitelfolie), quote (bullets[0]=Zitat, bullets[1]=Quelle), image (großes Bild, "
-                     "bullets[0]=Bildunterschrift). image = Pfad eines Bildes im JARVIS-Ordner, z. B. uploads/foto.jpg "
-                     "oder ein mit create_image erzeugtes Bild."),
+     "description": "PowerPoint. layout: bullets|two_column(right_bullets)|section|quote|image. image = Bildpfad, z. B. uploads/foto.jpg.",
      "parameters": obj({
-         "filename": S, "title": S, "subtitle": S,
-         "theme": {"type": "string", "enum": ["jarvis", "ironman", "hell"], "description": "Design"},
+         "filename": S, "title": S, "subtitle": S, "theme": {"type": "string", "enum": ["jarvis", "ironman", "hell"]},
          "slides": {"type": "array", "items": obj({
-             "title": S,
-             "layout": {"type": "string", "enum": ["bullets", "two_column", "section", "quote", "image"]},
-             "bullets": S_LIST, "left_title": S, "right_title": S, "right_bullets": S_LIST,
-             "image": {**S, "description": "optional: Bildpfad, z. B. uploads/foto.jpg"},
-             "notes": {**S, "description": "Sprechernotizen"},
+             "title": S, "layout": {"type": "string", "enum": ["bullets", "two_column", "section", "quote", "image"]},
+             "bullets": S_LIST, "left_title": S, "right_title": S, "right_bullets": S_LIST, "image": S, "notes": S,
          }, ["title", "bullets"])},
      }, ["filename", "title", "slides"])},
-    {"name": "create_docx",
-     "description": "Erstellt ein Word-Dokument (.docx) mit Überschriften, Absätzen, Aufzählungen und Bildern (Briefe, Berichte, Referate).",
-     "parameters": obj({"filename": S, "title": S,
-                        "sections": {"type": "array", "items": obj({"heading": S, "paragraphs": S_LIST, "bullets": S_LIST,
-                                                                    "image": {**S, "description": "optional: Bildpfad"}})}},
-                       ["filename", "title", "sections"])},
-    {"name": "create_xlsx",
-     "description": "Erstellt eine Excel-Tabelle (.xlsx). Zellen als Text; Zahlen werden erkannt, Formeln mit '=' beginnen.",
-     "parameters": obj({"filename": S,
-                        "sheets": {"type": "array", "items": obj({
-                            "name": S, "headers": S_LIST,
-                            "rows": {"type": "array", "items": S_LIST}}, ["name", "rows"])}},
-                       ["filename", "sheets"])},
-    {"name": "create_pdf",
-     "description": "Erstellt ein PDF-Dokument mit Überschriften, Absätzen, Aufzählungen, Tabellen und Bildern.",
-     "parameters": obj({"filename": S, "title": S,
-                        "sections": {"type": "array", "items": obj({
-                            "heading": S, "paragraphs": S_LIST, "bullets": S_LIST,
-                            "table": {"type": "array", "items": S_LIST, "description": "Zeilen; erste Zeile = Kopfzeile"},
-                            "image": {**S, "description": "optional: Bildpfad"}})}},
-                       ["filename", "title", "sections"])},
-    {"name": "create_chart",
-     "description": "Erstellt ein Diagramm als PNG-Bild (Balken, Linie, Kreis, Punkte).",
+    {"name": "create_docx", "description": "Word-Dokument (Brief, Bericht, Referat); image = Bildpfad.",
+     "parameters": obj({"filename": S, "title": S, "sections": {"type": "array", "items": obj(
+         {"heading": S, "paragraphs": S_LIST, "bullets": S_LIST, "image": S})}}, ["filename", "title", "sections"])},
+    {"name": "create_xlsx", "description": "Excel-Tabelle; Formeln beginnen mit '='.",
+     "parameters": obj({"filename": S, "sheets": {"type": "array", "items": obj(
+         {"name": S, "headers": S_LIST, "rows": {"type": "array", "items": S_LIST}}, ["name", "rows"])}},
+         ["filename", "sheets"])},
+    {"name": "create_pdf", "description": "PDF-Dokument; table = Zeilen (erste = Kopf), image = Bildpfad.",
+     "parameters": obj({"filename": S, "title": S, "sections": {"type": "array", "items": obj(
+         {"heading": S, "paragraphs": S_LIST, "bullets": S_LIST, "table": {"type": "array", "items": S_LIST}, "image": S})}},
+         ["filename", "title", "sections"])},
+    {"name": "create_chart", "description": "Diagramm als PNG.",
      "parameters": obj({"filename": S, "chart_type": {"type": "string", "enum": ["bar", "line", "pie", "scatter"]},
-                        "title": S, "labels": {**S_LIST, "description": "Beschriftungen der x-Achse bzw. Kreisstücke"},
-                        "series": {"type": "array", "items": obj({"name": S, "values": {"type": "array", "items": {"type": "number"}}},
-                                                                 ["values"])},
+                        "title": S, "labels": S_LIST,
+                        "series": {"type": "array", "items": obj({"name": S, "values": {"type": "array", "items": N}}, ["values"])},
                         "x_label": S, "y_label": S}, ["filename", "chart_type", "title", "labels", "series"])},
-    {"name": "create_image",
-     "description": ("Malt ein neues Bild mit KI (Foto, Illustration, Logo, Hintergrund …). prompt am besten auf Englisch "
-                     "und detailliert (Motiv, Stil, Licht, Farben). Dauert 10-60 Sekunden."),
-     "parameters": obj({"prompt": S, "filename": S, "width": {"type": "integer"}, "height": {"type": "integer"}},
-                       ["prompt"])},
-    {"name": "create_qr", "description": "Erstellt einen QR-Code (PNG) für Link, Text, Telefonnummer oder WLAN.",
-     "parameters": obj({"filename": S, "content": S}, ["content"])},
-    {"name": "create_audio", "description": "Erstellt eine MP3-Datei, in der ein Text vorgelesen wird.",
-     "parameters": obj({"filename": S, "text": S, "lang": {**S, "description": "Sprache, z. B. de, en, fr"}}, ["text"])},
+    {"name": "create_image", "description": "Malt ein Bild mit KI. prompt detailliert auf Englisch.",
+     "parameters": obj({"prompt": S, "filename": S, "width": I, "height": I}, ["prompt"])},
+    {"name": "create_qr", "description": "QR-Code (PNG).", "parameters": obj({"filename": S, "content": S}, ["content"])},
+    {"name": "create_audio", "description": "MP3, die einen Text vorliest.",
+     "parameters": obj({"filename": S, "text": S, "lang": S}, ["text"])},
     {"name": "edit_image",
-     "description": ("Bearbeitet oder wandelt ein Bild aus dem JARVIS-Ordner um (z. B. ein hochgeladenes Foto): Größe, "
-                     "Drehen, Schwarz-Weiß, Spiegeln, Zuschneiden, Helligkeit/Kontrast. Das Format ergibt sich aus der "
-                     "Endung von filename (.png, .jpg, .webp, .gif, .bmp, .pdf)."),
-     "parameters": obj({"path": S, "filename": S, "width": {"type": "integer"}, "height": {"type": "integer"},
-                        "rotate": {"type": "number", "description": "Grad im Uhrzeigersinn"},
-                        "grayscale": {"type": "boolean"}, "mirror": {"type": "boolean"}, "flip": {"type": "boolean"},
-                        "crop": {**S, "description": "links,oben,rechts,unten in Prozent, z. B. 10,10,90,90"},
-                        "brightness": {"type": "number", "description": "1 = normal, 1.3 = heller"},
-                        "contrast": {"type": "number", "description": "1 = normal"}}, ["path", "filename"])},
-    {"name": "create_zip", "description": "Packt mehrere Dateien aus dem JARVIS-Ordner in ein ZIP-Archiv.",
-     "parameters": obj({"filename": S, "files": S_LIST}, ["files"])},
-    {"name": "read_file",
-     "description": "Liest eine hochgeladene oder erstellte Datei (PDF, Word, Excel, PowerPoint, Text, Code). Lange Dateien abschnittsweise mit start.",
-     "parameters": obj({"path": {**S, "description": "z. B. uploads/vertrag.pdf"}, "start": {"type": "integer"}}, ["path"])},
-    {"name": "list_files", "description": "Listet alle Dateien im JARVIS-Ordner auf (erstellte und hochgeladene).", "parameters": None},
+     "description": "Bild bearbeiten/umwandeln (Format = Endung von filename, auch .pdf). crop = 'l,o,r,u' in Prozent.",
+     "parameters": obj({"path": S, "filename": S, "width": I, "height": I, "rotate": N, "grayscale": B, "mirror": B,
+                        "flip": B, "crop": S, "brightness": N, "contrast": N}, ["path", "filename"])},
+    {"name": "create_zip", "description": "Dateien als ZIP bündeln.", "parameters": obj({"filename": S, "files": S_LIST}, ["files"])},
+    {"name": "read_file", "description": "Datei lesen (PDF, Word, Excel, PowerPoint, Text); lang → mit start weiterlesen.",
+     "parameters": obj({"path": S, "start": I}, ["path"])},
+    {"name": "list_files", "description": "Alle Dateien auflisten.", "parameters": None},
 ]
 
 MAIL_TOOLS = [
-    {"name": "list_emails", "description": "Zeigt die neuesten Mails im Posteingang (Absender, Betreff, Datum, id).",
-     "parameters": obj({"unread_only": {"type": "boolean", "description": "nur ungelesene"},
-                        "limit": {"type": "integer", "description": "Anzahl, Standard 10"}})},
-    {"name": "search_emails", "description": "Sucht Mails nach Stichwort, Absender oder Betreff.",
-     "parameters": obj({"query": S, "limit": {"type": "integer"}}, ["query"])},
-    {"name": "read_email", "description": "Liest eine Mail vollständig (id aus list_emails/search_emails).",
-     "parameters": obj({"id": S}, ["id"])},
-    {"name": "reply_email",
-     "description": "Beantwortet eine Mail (an den Absender). Nur benutzen, wenn der Nutzer es gerade verlangt hat.",
-     "parameters": obj({"id": S, "text": {**S, "description": "Fertiger Antworttext inkl. Gruß"}}, ["id", "text"])},
-    {"name": "send_email",
-     "description": "Sendet eine neue Mail. Nur benutzen, wenn der Nutzer es gerade verlangt und die Adresse genannt hat.",
-     "parameters": obj({"to": {**S, "description": "Empfänger-Adresse(n), Komma-getrennt"}, "subject": S, "text": S},
-                       ["to", "subject", "text"])},
+    {"name": "list_emails", "description": "Neueste Mails im Posteingang.", "parameters": obj({"unread_only": B, "limit": I})},
+    {"name": "search_emails", "description": "Mails suchen.", "parameters": obj({"query": S, "limit": I}, ["query"])},
+    {"name": "read_email", "description": "Mail lesen (id aus der Liste).", "parameters": obj({"id": S}, ["id"])},
+    {"name": "reply_email", "description": "Mail beantworten – nur wenn der Nutzer es gerade verlangt.",
+     "parameters": obj({"id": S, "text": S}, ["id", "text"])},
+    {"name": "send_email", "description": "Neue Mail senden – nur wenn der Nutzer es verlangt und die Adresse nennt.",
+     "parameters": obj({"to": S, "subject": S, "text": S}, ["to", "subject", "text"])},
 ]
 
-SEARCH_TOOL = {"name": "search_web",
-               "description": "Sucht aktuelle Informationen im Internet (Nachrichten, Wetter, Sport, Preise, Fakten).",
+SEARCH_TOOL = {"name": "search_web", "description": "Aktuelle Infos aus dem Internet (Nachrichten, Wetter, Preise …).",
                "parameters": obj({"query": S}, ["query"])}
 
 

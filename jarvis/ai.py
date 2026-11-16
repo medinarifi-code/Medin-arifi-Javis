@@ -1,9 +1,15 @@
-"""Das Gehirn von JARVIS: Groq (kostenlos) mit Werkzeugen und Streaming."""
+"""Das Gehirn von JARVIS: Groq (kostenlos) mit Werkzeugen und Streaming.
+
+Zuverlässigkeit: Jede Frage probiert bei Problemen der Reihe nach mehrere Groq-Modelle
+(Rate-Limit, zu große Anfrage, Modell weg, kaputter Werkzeug-Aufruf, Netzwerkfehler) und
+zuletzt eine Antwort ohne Werkzeuge. Erst wenn wirklich nichts geht, kommt eine freundliche Meldung.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from typing import Callable
@@ -20,14 +26,21 @@ log = logging.getLogger("jarvis")
 OnText = Callable[[str], None]
 OnStatus = Callable[[str], None]
 
-# Ist ein Modell nicht verfügbar oder sein Gratis-Kontingent leer, nimmt JARVIS das nächste.
-DEFAULT_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
+DEFAULT_MODELS = [
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "meta-llama/llama-4-scout-17b-16e-instruct",  # hohes Token-Limit pro Minute
+    "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant",
+]
 SEARCH_MODELS = ["groq/compound-mini", "groq/compound"]
-# Modelle, die Bilder sehen können (werden beim ersten Bild mit der Modell-Liste von Groq abgeglichen)
 VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"]
 VISION_HINTS = ("llama-4", "vision", "-vl", "qwen3.6", "qwen-vl")
-MAX_STEPS = 15
-HISTORY_LIMIT = 16  # so bleibt jede Anfrage im kostenlosen Token-Limit
+MAX_STEPS = 15        # Werkzeug-Runden pro Frage
+MAX_ATTEMPTS = 14     # Anfragen an Groq pro Frage (inkl. Wiederholungen)
+HISTORY_LIMIT = 12    # Nachrichten, die mitgeschickt werden
+TOOL_RESULT_KEEP = 1200  # so lang bleiben alte Werkzeug-Ergebnisse im Verlauf
+BUSY_TEXT = "Ich bin gerade etwas überlastet. Bitte versuch es in einer Minute nochmal."
 
 
 def short_error(message: str, limit: int = 160) -> str:
@@ -36,8 +49,12 @@ def short_error(message: str, limit: int = 160) -> str:
     return text[:limit] + ("…" if len(text) > limit else "")
 
 
-class _Retry(Exception):
-    """Interner Hinweis: Anfrage mit angepassten Einstellungen wiederholen."""
+class _GiveUp(Exception):
+    """Alle Wege probiert – Fehler an den Nutzer melden."""
+
+
+class _NoAnswer(Exception):
+    """Kein Modell hat eine Antwort geliefert."""
 
 
 class Jarvis:
@@ -45,19 +62,16 @@ class Jarvis:
 
     def __init__(self, cfg: Config, client: Groq | None = None):
         self.cfg = cfg
-        self.client = client or Groq(api_key=cfg.groq_api_key or "missing", max_retries=1, timeout=60)
-        self.models = [cfg.groq_model] if cfg.groq_model else list(DEFAULT_MODELS)
+        self.client = client or Groq(api_key=cfg.groq_api_key or "missing", max_retries=0, timeout=60)
+        preferred = [cfg.groq_model] if cfg.groq_model else []
+        self.models = preferred + [m for m in DEFAULT_MODELS if m not in preferred]
         self.history: list[dict] = []
         self.known_addresses: set[str] = set()
         self.tools_ok = True
         self.vision_models: list[str] | None = None
-        self.vision = False  # aktuelle Anfrage enthält Bilder
+        self.vision = False  # aktuelle Frage enthält Bilder
 
-    @property
-    def model(self) -> str:
-        return self._active()[0]
-
-    def _active(self) -> list[str]:
+    def _candidates(self) -> list[str]:
         if self.vision:
             if self.vision_models is None:
                 self.vision_models = self._find_vision_models()
@@ -65,8 +79,6 @@ class Jarvis:
         return self.models
 
     def _find_vision_models(self) -> list[str]:
-        import os
-
         wanted = [m for m in [os.getenv("GROQ_VISION_MODEL")] if m] + VISION_MODELS
         try:
             available = [m.id for m in self.client.models.list().data]
@@ -75,7 +87,6 @@ class Jarvis:
             return wanted
         found = [m for m in wanted if m in available]
         found += [m for m in available if any(h in m.lower() for h in VISION_HINTS) and m not in found]
-        log.info("Bild-Modelle: %s", found or wanted)
         return found or wanted
 
     def reset(self) -> None:
@@ -99,14 +110,18 @@ class Jarvis:
                 # Verlauf schlank halten: Bilder/lange Texte durch kurze Hinweise ersetzen
                 self.history[checkpoint] = {"role": "user", "content": "\n\n".join(
                     [text, *(u.history_part() for u in uploads)])}
+            self._shrink_history()
+        except _NoAnswer:
+            del self.history[checkpoint:]
+            on_text(BUSY_TEXT)
         except groq.APIError as e:
-            log.error("Groq-Fehler (%s): %s", self.model, short_error(str(e), 500))
+            log.error("Groq-Fehler: %s", short_error(str(e), 500))
             del self.history[checkpoint:]
             on_text(self._explain(e))
         except Exception as e:  # noqa: BLE001
             log.exception("Unerwarteter Fehler")
             del self.history[checkpoint:]
-            on_text(f"Da ist etwas schiefgelaufen ({type(e).__name__}: {short_error(str(e), 100)}). Bitte noch einmal versuchen.")
+            on_text("Da ist gerade etwas schiefgelaufen. Bitte versuch es nochmal.")
         finally:
             self.vision = False
 
@@ -120,6 +135,13 @@ class Jarvis:
             return full
         return [{"type": "text", "text": full},
                 *({"type": "image_url", "image_url": {"url": u.data_url}} for u in images)]
+
+    def _shrink_history(self) -> None:
+        """Lange Werkzeug-Ergebnisse (gelesene Mails, Dateien …) im Verlauf kürzen – spart Tokens."""
+        for msg in self.history:
+            content = msg.get("content")
+            if msg.get("role") == "tool" and isinstance(content, str) and len(content) > TOOL_RESULT_KEEP:
+                msg["content"] = content[:TOOL_RESULT_KEEP] + " […gekürzt]"
 
     # ------------------------------------------------------------------ Anfrage bauen
     def _messages(self, ctx: ToolContext) -> list[dict]:
@@ -137,70 +159,93 @@ class Jarvis:
         }} for t in tool_definitions(ctx.mailbox is not None)]
 
     # ------------------------------------------------------------------ Fehler
-    def _explain(self, e: groq.APIError) -> str:
-        msg = str(getattr(e, "message", "") or e)
+    @staticmethod
+    def _explain(e: groq.APIError) -> str:
         if isinstance(e, groq.AuthenticationError):
             return "Mein GROQ_API_KEY wird abgelehnt. Bitte den Key bei Render prüfen (er beginnt mit gsk_)."
-        if isinstance(e, groq.RateLimitError):
-            return "Das kostenlose Kontingent ist gerade ausgeschöpft. Bitte eine Minute warten und es erneut versuchen."
         if isinstance(e, groq.PermissionDeniedError):
-            return f"Groq verweigert den Zugriff: {short_error(msg)}"
+            return "Groq verweigert gerade den Zugriff. Bitte prüfe dein Groq-Konto auf console.groq.com."
         if isinstance(e, groq.APIConnectionError):
-            return "Ich kann die Groq-Server gerade nicht erreichen. Bitte gleich noch einmal versuchen."
-        if isinstance(e, groq.InternalServerError):
-            return "Die Groq-Server sind gerade überlastet. Bitte gleich noch einmal versuchen."
-        code = getattr(e, "status_code", "?")
-        return f"Fehler von Groq (Statuscode {code}): {short_error(msg)}"
+            return "Ich kann die Groq-Server gerade nicht erreichen. Bitte versuch es gleich nochmal."
+        return BUSY_TEXT
 
-    def _handle(self, e: groq.APIError, state: dict) -> None:
-        """Entscheidet, ob und wie eine fehlgeschlagene Anfrage wiederholt wird (sonst: weiterwerfen)."""
+    @staticmethod
+    def _retry_after(e: groq.APIError) -> float | None:
+        try:
+            value = e.response.headers.get("retry-after")  # type: ignore[union-attr]
+            return float(value) if value is not None else None
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    def _next_model(self, state: dict, cands: list[str], reason: str) -> None:
+        if state["idx"] + 1 < len(cands):
+            log.warning("Modell %s: %s – versuche %s", cands[state["idx"]], reason, cands[state["idx"] + 1])
+            state.update(idx=state["idx"] + 1, net=0, waited429=False, tool_retry=False)
+            return
+        if self.tools_ok:
+            # Letzter Ausweg: ohne Werkzeuge, mit kurzem Verlauf, wieder beim ersten Modell
+            log.warning("Alle Modelle scheitern (%s) – letzter Versuch ohne Werkzeuge", reason)
+            self.tools_ok = False
+            self._trim_to_question()
+            state.update(idx=0, net=0, waited429=False, tool_retry=False)
+            return
+        raise _GiveUp
+
+    def _trim_to_question(self) -> None:
+        for i in range(len(self.history) - 1, -1, -1):
+            if self.history[i]["role"] == "user":
+                self.history[:] = self.history[i:]
+                return
+
+    def _recover(self, e: groq.APIError, state: dict, cands: list[str]) -> None:
+        """Passt die Einstellungen an, damit der nächste Versuch klappt – oder wirft _GiveUp."""
+        if isinstance(e, (groq.AuthenticationError, groq.PermissionDeniedError)):
+            raise _GiveUp
         low = str(getattr(e, "message", "") or e).lower()
         status = getattr(e, "status_code", None)
-        if isinstance(e, groq.InternalServerError) and not state.get("waited"):
-            state["waited"] = True
-            time.sleep(2)
-            raise _Retry
-        model_gone = status == 404 or "decommissioned" in low or "does not exist" in low or "model_not_found" in low
-        no_images = self.vision and status == 400 and ("image" in low or "vision" in low or "multimodal" in low)
-        active = self._active()
-        if (isinstance(e, groq.RateLimitError) or model_gone or no_images) and len(active) > 1:
-            log.warning("Modell %s nicht nutzbar (%s) - nehme %s", active[0], status, active[1])
-            active.pop(0)
-            raise _Retry
+
+        if isinstance(e, (groq.APIConnectionError, groq.InternalServerError)) or (status or 0) >= 500:
+            if state["net"] < 2:
+                state["net"] += 1
+                time.sleep(1.5 * state["net"])
+                return
+            return self._next_model(state, cands, "Server/Netzwerk")
         if status == 413 or "too large" in low or "context_length" in low or "reduce the length" in low:
-            if not state.get("trimmed"):
+            if not state["trimmed"]:
                 state["trimmed"] = True
-                self.history[:] = self.history[-1:] if self.history[-1]["role"] == "user" else self.history[-2:]
-                raise _Retry
+                self._trim_to_question()
+                return
+            return self._next_model(state, cands, "Anfrage zu groß")
+        if isinstance(e, groq.RateLimitError) or status == 429:
+            wait = self._retry_after(e)
+            if wait is not None and wait <= 8 and not state["waited429"]:
+                state["waited429"] = True
+                time.sleep(max(0.5, wait))
+                return
+            return self._next_model(state, cands, "Rate-Limit")
         if "tool_use_failed" in low or "failed_generation" in low or "tool call validation" in low:
-            tries = state.get("tool_fail", 0) + 1
-            state["tool_fail"] = tries
-            if tries == 1:
-                raise _Retry
-            if tries == 2 and len(self._active()) > 1:
-                self._active().pop(0)
-                raise _Retry
-            if self.tools_ok:
-                log.warning("Werkzeug-Aufrufe scheitern - antworte ohne Werkzeuge")
-                self.tools_ok = False
-                raise _Retry
-        raise e
+            if not state["tool_retry"]:
+                state["tool_retry"] = True
+                return
+            return self._next_model(state, cands, "Werkzeug-Aufruf")
+        # 404 (Modell weg), Bild nicht unterstützt, sonstige 4xx: anderes Modell
+        return self._next_model(state, cands, f"Fehler {status}")
 
     # ------------------------------------------------------------------ Schleife
-    def _turn(self, ctx: ToolContext, on_text: OnText) -> tuple[str, list[dict], bool]:
-        """Eine Anfrage, live gestreamt. Rückgabe: (Text, Werkzeug-Aufrufe, schon etwas ausgegeben?)"""
-        kwargs = {"model": self.model, "messages": self._messages(ctx), "stream": True, "temperature": 0.6}
+    def _turn(self, ctx: ToolContext, on_text: OnText, model: str, state: dict) -> tuple[str, list[dict]]:
+        """Eine Anfrage, live gestreamt. Rückgabe: (Text, Werkzeug-Aufrufe)."""
+        kwargs = {"model": model, "messages": self._messages(ctx), "stream": True, "temperature": 0.6}
         tools = self._tools(ctx)
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
-        text, calls, emitted = "", {}, False
+        text, calls = "", {}
         for chunk in self.client.chat.completions.create(**kwargs):
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
             if delta.content:
                 text += delta.content
-                emitted = True
+                state["emitted"] = True
                 on_text(delta.content)
             for tc in delta.tool_calls or []:
                 slot = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
@@ -210,25 +255,38 @@ class Jarvis:
                     slot["name"] += tc.function.name
                 if tc.function and tc.function.arguments:
                     slot["arguments"] += tc.function.arguments
-        return text, [calls[i] for i in sorted(calls)], emitted
+        return text, [calls[i] for i in sorted(calls)]
 
     def _run(self, ctx: ToolContext, on_text: OnText, on_status: OnStatus) -> None:
-        state: dict = {}
-        steps = 0
+        state = {"idx": 0, "net": 0, "waited429": False, "tool_retry": False, "trimmed": False, "emitted": False}
+        steps = attempts = 0
         while steps < MAX_STEPS:
+            cands = self._candidates()
+            model = cands[min(state["idx"], len(cands) - 1)]
+            attempts += 1
+            state["emitted"] = False
             try:
-                text, calls, _ = self._turn(ctx, on_text)
+                text, calls = self._turn(ctx, on_text, model, state)
             except groq.APIError as e:
+                log.info("Groq-Fehler mit %s: %s", model, short_error(str(e), 300))
+                if state["emitted"] or attempts >= MAX_ATTEMPTS:
+                    raise  # schon Text ausgegeben → nicht doppelt antworten
                 try:
-                    self._handle(e, state)
-                except _Retry:
-                    continue
+                    self._recover(e, state, cands)
+                except _GiveUp:
+                    raise e from None
+                continue
+            if not calls and not text.strip():
+                # leere Antwort → anderes Modell probieren
+                if attempts >= MAX_ATTEMPTS:
+                    break
+                try:
+                    self._next_model(state, cands, "leere Antwort")
+                except _GiveUp:
+                    break
+                continue
             steps += 1
             if not calls:
-                if not text.strip():
-                    on_text("Ich habe gerade keine Antwort erhalten. Bitte noch einmal versuchen.")
-                    self.history.pop()
-                    return
                 self.history.append({"role": "assistant", "content": text})
                 return
             for i, c in enumerate(calls):
@@ -238,7 +296,11 @@ class Jarvis:
                 for c in calls]})
             for c in calls:
                 self.history.append({"role": "tool", "tool_call_id": c["id"], "content": self._call(c, ctx, on_status)})
-        on_text(" Ich habe die maximale Anzahl an Arbeitsschritten erreicht.")
+            state.update(net=0, waited429=False, tool_retry=False)
+        else:
+            on_text(" Ich habe die maximale Anzahl an Arbeitsschritten erreicht.")
+            return
+        raise _NoAnswer
 
     def _call(self, call: dict, ctx: ToolContext, on_status: OnStatus) -> str:
         name = call["name"]
@@ -269,4 +331,5 @@ class Jarvis:
             except groq.APIError as e:
                 last = e
                 log.warning("Websuche mit %s fehlgeschlagen: %s", model, short_error(str(e), 300))
-        return f"Fehler: Die Internetsuche ist gerade nicht verfügbar ({short_error(str(last), 100)}). Antworte aus deinem Wissen und sage, dass es nicht ganz aktuell sein könnte."
+        return ("Fehler: Die Internetsuche ist gerade nicht verfügbar "
+                f"({short_error(str(last), 100)}). Antworte aus deinem Wissen und sage, dass es nicht ganz aktuell sein könnte.")

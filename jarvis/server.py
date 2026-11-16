@@ -294,6 +294,34 @@ def list_files():
              "upload": p.relative_to(root).parts[0] == "uploads"} for p in files[:40]]
 
 
+@app.delete("/api/files")
+def delete_file(path: str):
+    """Löscht eine Datei aus dem JARVIS-Ordner (nur dort – Pfade wie '../' werden abgelehnt)."""
+    from .tools.files import ToolError, existing_path
+
+    try:
+        target = existing_path(cfg.output_dir, path)
+    except ToolError as e:
+        raise HTTPException(404, str(e)) from e
+    target.unlink()
+    log.info("Datei gelöscht: %s", path)
+    return {"ok": True}
+
+
+@app.post("/api/files/delete-all")
+def delete_all_files():
+    root = cfg.output_dir.resolve()
+    count = 0
+    for p in sorted(root.rglob("*"), reverse=True):  # erst Dateien, dann leere Ordner
+        if p.is_file():
+            p.unlink()
+            count += 1
+        elif p.is_dir() and not any(p.iterdir()):
+            p.rmdir()
+    log.info("%s Dateien gelöscht", count)
+    return {"ok": True, "deleted": count}
+
+
 def _cpu_percent() -> float | None:
     try:
         return round(min(100.0, os.getloadavg()[0] / (os.cpu_count() or 1) * 100), 1)
