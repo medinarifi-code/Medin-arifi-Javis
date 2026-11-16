@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from typing import Any, Callable
 
 import anthropic
@@ -17,20 +19,62 @@ OnEvent = Callable[[dict[str, Any]], None]
 
 MAX_STEPS = 25  # Sicherheitsgrenze für Werkzeug-Runden pro Anfrage
 
+log = logging.getLogger("jarvis")
+
+
+def short_error(message: str, limit: int = 160) -> str:
+    """Kurze, vorlesbare Fassung einer API-Fehlermeldung (ohne Schlüssel)."""
+    text = re.sub(r"(sk-ant-|sk_|AIza)[\w-]+", "***", str(message or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit] + ("…" if len(text) > limit else "")
+
 
 def create_brain(cfg: Config, web: bool = False):
-    """Wählt das Gehirn: Claude (Anthropic) oder kostenlos Gemini (Google)."""
+    """Wählt das Gehirn: Claude (Anthropic) oder kostenlos Gemini (Google).
+
+    Ist Claude eingestellt und zusätzlich ein Gemini-Key vorhanden, wechselt JARVIS
+    automatisch auf Gemini, falls Claude nicht nutzbar ist (z.B. kein Guthaben).
+    """
     if cfg.provider == "gemini":
         from .brain_gemini import GeminiBrain
 
         return GeminiBrain(cfg, web=web)
+    if cfg.gemini_api_key:
+        return FallbackBrain(cfg, web=web)
     return Brain(cfg, web=web)
 
 
-class Brain:
+class FallbackBrain:
+    """Claude zuerst; bei Konto-Problemen (Guthaben, Key, Rechte) dauerhaft Gemini."""
+
     def __init__(self, cfg: Config, web: bool = False):
         self.cfg = cfg
+        self.web = web
+        self.active = Brain(cfg, web=web, defer_account_errors=True)
+        self.switched = False
+
+    def reset(self) -> None:
+        self.active.reset()
+
+    def ask(self, user_text: str, on_text: OnText, on_status: OnStatus, on_event: OnEvent | None = None) -> None:
+        self.active.ask(user_text, on_text, on_status, on_event)
+        if not self.switched and getattr(self.active, "account_error", None):
+            from .brain_gemini import GeminiBrain
+
+            log.warning("Claude nicht nutzbar (%s) - wechsle auf Gemini", self.active.account_error)
+            on_status("Claude ist nicht verfügbar, wechsle auf Gemini (kostenlos)")
+            self.active = GeminiBrain(self.cfg, web=self.web)
+            self.switched = True
+            self.active.ask(user_text, on_text, on_status, on_event)
+
+
+class Brain:
+    def __init__(self, cfg: Config, web: bool = False, defer_account_errors: bool = False):
+        self.cfg = cfg
         self.web = web  # Web-Modus: Dateien/Webseiten öffnet der Browser
+        # True: Konto-Fehler nicht ansagen, sondern in account_error ablegen (für FallbackBrain)
+        self.defer_account_errors = defer_account_errors
+        self.account_error: str | None = None
         self.client = anthropic.Anthropic(api_key=cfg.anthropic_api_key) if cfg.anthropic_api_key else anthropic.Anthropic()
         self.system = system_prompt(cfg, web=web)
         self.messages: list[dict] = []
@@ -46,22 +90,39 @@ class Brain:
         oder etwas geöffnet werden soll (für die Weboberfläche).
         """
         self._on_event = on_event
+        self.account_error = None
         checkpoint = len(self.messages)
         self.messages.append({"role": "user", "content": user_text})
         try:
             self._run(on_text, on_status)
-        except anthropic.AuthenticationError:
+        except anthropic.AuthenticationError as e:
             self._rollback(checkpoint)
-            on_text("Mein Zugangsschlüssel für das Sprachmodell wird abgelehnt. Bitte prüfen Sie den Anthropic-API-Key in der Datei .env.")
+            self._account_problem(e, on_text, "Mein Anthropic-Zugangsschlüssel wird abgelehnt. Bitte prüfen Sie den ANTHROPIC_API_KEY.")
+        except anthropic.PermissionDeniedError as e:
+            self._rollback(checkpoint)
+            self._account_problem(e, on_text, "Mein Anthropic-Konto hat keine Berechtigung für dieses Modell.")
         except anthropic.RateLimitError:
             self._rollback(checkpoint)
             on_text("Ich bin gerade überlastet. Bitte versuchen Sie es in einem Moment noch einmal.")
         except anthropic.APIStatusError as e:
             self._rollback(checkpoint)
-            on_text(f"Bei der Verbindung zu meinen Servern ist ein Fehler aufgetreten, Statuscode {e.status_code}.")
+            message = str(getattr(e, "message", "") or e)
+            if "credit balance" in message.lower() or "billing" in message.lower():
+                self._account_problem(e, on_text, "Ihr Anthropic-Konto hat kein Guthaben. Lassen Sie ANTHROPIC_API_KEY leer "
+                                                  "und tragen Sie stattdessen den kostenlosen GEMINI_API_KEY ein.")
+            else:
+                log.error("Claude-Fehler %s: %s", e.status_code, message)
+                on_text(f"Bei der Verbindung zu meinen Servern ist ein Fehler aufgetreten, Statuscode {e.status_code}: "
+                        f"{short_error(message)}")
         except anthropic.APIConnectionError:
             self._rollback(checkpoint)
             on_text("Ich kann meine Server nicht erreichen. Bitte prüfen Sie die Internetverbindung.")
+
+    def _account_problem(self, e: Exception, on_text: OnText, message: str) -> None:
+        log.error("Claude-Kontoproblem: %s", short_error(str(e), 500))
+        self.account_error = message
+        if not self.defer_account_errors:
+            on_text(message)
 
     def _rollback(self, checkpoint: int) -> None:
         # Unvollständige Runde entfernen, damit der Verlauf gültig bleibt.

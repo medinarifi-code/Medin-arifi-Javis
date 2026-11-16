@@ -5,13 +5,15 @@ Gleiche Schnittstelle wie brain.Brain: ask(text, on_text, on_status, on_event) u
 
 from __future__ import annotations
 
+import copy
 import json
+import time
 from typing import Any
 
 from google import genai
 from google.genai import errors, types
 
-from .brain import MAX_STEPS, OnEvent, OnStatus, OnText
+from .brain import MAX_STEPS, OnEvent, OnStatus, OnText, log, short_error
 from .config import Config
 from .persona import system_prompt
 from .tools import CUSTOM_TOOLS, ToolError, ToolResult, describe_call, execute_tool, validate
@@ -27,10 +29,37 @@ SEARCH_TOOL = {
 }
 
 
+def _gemini_schema(schema: Any) -> Any:
+    """Vereinfacht ein JSON-Schema auf das, was Gemini sicher akzeptiert."""
+    if isinstance(schema, list):
+        return [_gemini_schema(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for key, value in schema.items():
+        if key == "additionalProperties":
+            continue
+        if key == "type" and isinstance(value, list):
+            non_null = [t for t in value if t != "null"]
+            value = non_null[0] if non_null else "string"
+        out[key] = _gemini_schema(value) if key in ("properties", "items") or isinstance(value, (dict, list)) else value
+    if "properties" in out:
+        out["properties"] = {k: _gemini_schema(v) for k, v in schema["properties"].items()}
+    if "required" in out and not out["required"]:
+        del out["required"]
+    return out
+
+
 def _declarations() -> list[types.FunctionDeclaration]:
-    return [types.FunctionDeclaration(name=t["name"], description=t["description"],
-                                      parameters_json_schema=t["input_schema"])
-            for t in [*CUSTOM_TOOLS, SEARCH_TOOL]]
+    decls = []
+    for t in [*CUSTOM_TOOLS, SEARCH_TOOL]:
+        schema = _gemini_schema(copy.deepcopy(t["input_schema"]))
+        if schema.get("properties"):
+            decls.append(types.FunctionDeclaration(name=t["name"], description=t["description"],
+                                                   parameters_json_schema=schema))
+        else:  # Werkzeug ohne Parameter (z.B. get_datetime)
+            decls.append(types.FunctionDeclaration(name=t["name"], description=t["description"]))
+    return decls
 
 
 class GeminiBrain:
@@ -44,8 +73,12 @@ class GeminiBrain:
             tools=[types.Tool(function_declarations=_declarations())],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
+        # Notfall-Konfiguration ohne Werkzeuge, falls Google die Werkzeuge ablehnt
+        self.config_plain = types.GenerateContentConfig(system_instruction=system_prompt(cfg, web=web))
+        self.tools_ok = True
         self.history: list[types.Content] = []
         self._on_event: OnEvent | None = None
+        self._checkpoint = 0
 
     @property
     def model(self) -> str:
@@ -57,44 +90,88 @@ class GeminiBrain:
     # ------------------------------------------------------------------
     def ask(self, user_text: str, on_text: OnText, on_status: OnStatus, on_event: OnEvent | None = None) -> None:
         self._on_event = on_event
-        checkpoint = len(self.history)
+        self._checkpoint = len(self.history)
         self.history.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
         try:
             self._run(on_text, on_status)
         except errors.APIError as e:
-            del self.history[checkpoint:]
+            log.error("Gemini-Fehler %s (%s): %s", e.code, self.model, getattr(e, "message", e))
+            del self.history[self._checkpoint:]
             on_text(self._explain(e))
         except Exception as e:  # noqa: BLE001 - z.B. Netzwerkfehler
-            del self.history[checkpoint:]
-            on_text(f"Ich kann meine Server gerade nicht erreichen ({type(e).__name__}). Bitte versuchen Sie es gleich noch einmal.")
+            log.exception("Gemini: unerwarteter Fehler")
+            del self.history[self._checkpoint:]
+            on_text(f"Ich kann meine Server gerade nicht erreichen ({type(e).__name__}: {short_error(str(e), 100)}). "
+                    "Bitte versuchen Sie es gleich noch einmal.")
 
     def _explain(self, e: errors.APIError) -> str:
         msg = str(getattr(e, "message", "") or e)
+        low = msg.lower()
         if e.code == 429:
             return "Das kostenlose Kontingent ist gerade ausgeschöpft. Bitte warten Sie eine Minute und versuchen Sie es erneut."
-        if e.code in (400, 401, 403) and ("API key" in msg or "PERMISSION" in msg.upper()):
+        if "location" in low and "not supported" in low:
+            return ("Google bietet die kostenlose KI in Ihrer Region leider nicht an. Nutzen Sie mich über den Render-Link, "
+                    "dort laufe ich auf einem Server in den USA.")
+        if e.code in (400, 401, 403) and ("api key" in low or "permission" in low or "api_key" in low):
             return "Mein Gemini-Zugangsschlüssel wird abgelehnt. Bitte prüfen Sie den GEMINI_API_KEY."
-        if e.code in (500, 503):
+        if e.code in (500, 502, 503, 504):
             return "Die Server von Google sind gerade überlastet. Bitte versuchen Sie es gleich noch einmal."
-        return f"Bei der Verbindung zu meinen Servern ist ein Fehler aufgetreten, Statuscode {e.code}."
+        return f"Bei der Verbindung zu meinen Servern ist ein Fehler aufgetreten, Statuscode {e.code}: {short_error(msg)}"
 
     def _stream(self):
-        """Startet die Anfrage; probiert bei 'Modell nicht gefunden' das nächste Modell."""
+        """Startet die Anfrage. Bei 'Modell nicht gefunden' oder ausgeschöpftem Kontingent
+        wird das nächste Modell probiert, bei Überlastung einmal kurz gewartet."""
+        waited = False
         while True:
+            config = self.config if self.tools_ok else self.config_plain
             try:
                 stream = self.client.models.generate_content_stream(
-                    model=self.model, contents=self.history, config=self.config)
+                    model=self.model, contents=self.history, config=config)
                 first = next(stream, None)
                 return first, stream
-            except errors.ClientError as e:
-                if e.code == 404 and len(self.models) > 1:
+            except errors.APIError as e:
+                if e.code in (429, 500, 503) and not waited:
+                    waited = True
+                    time.sleep(2)
+                    continue
+                if e.code in (404, 429) and len(self.models) > 1:
+                    log.warning("Gemini-Modell %s nicht nutzbar (%s) - versuche %s", self.model, e.code, self.models[1])
                     self.models.pop(0)
+                    waited = False
+                    continue
+                raise
+
+    def _start(self):
+        """Wie _stream, repariert aber bekannte 400-Fehler einmalig selbst."""
+        repaired = set()
+        while True:
+            try:
+                return self._stream()
+            except errors.ClientError as e:
+                if e.code != 400:
+                    raise
+                low = str(getattr(e, "message", "") or e).lower()
+                history_problem = any(w in low for w in ("thought_signature", "thought signature", "function call turn",
+                                                          "function response turn", "comes immediately after",
+                                                          "number of function response parts"))
+                tool_problem = any(w in low for w in ("function", "schema", "parameter", "tool", "declaration"))
+                if history_problem and "history" not in repaired and len(self.history) > 1:
+                    log.warning("Gemini lehnt den Verlauf ab - beginne mit der aktuellen Frage neu: %s", low[:300])
+                    current = self.history[self._checkpoint] if self._checkpoint < len(self.history) else self.history[-1]
+                    self.history[:] = [current]
+                    self._checkpoint = 0
+                    repaired.add("history")
+                    continue
+                if tool_problem and self.tools_ok and "tools" not in repaired:
+                    log.warning("Gemini lehnt die Werkzeuge ab - antworte ohne Werkzeuge: %s", low[:300])
+                    self.tools_ok = False
+                    repaired.add("tools")
                     continue
                 raise
 
     def _run(self, on_text: OnText, on_status: OnStatus) -> None:
         for _ in range(MAX_STEPS):
-            first, stream = self._stream()
+            first, stream = self._start()
             parts: list[types.Part] = []
             calls: list[types.FunctionCall] = []
             finish = None

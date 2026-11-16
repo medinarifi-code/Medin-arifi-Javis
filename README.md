@@ -114,6 +114,8 @@ Ohne ElevenLabs-Key benutzt JARVIS automatisch die Windows-Systemstimme.
 ## Fehlerbehebung
 - **„Kein Mikrofon“:** In Windows unter *Einstellungen → Datenschutz → Mikrofon* den Zugriff für Desktop-Apps erlauben. Falls `PyAudio` sich nicht installieren lässt: `.venv\Scripts\pip install pipwin && .venv\Scripts\pipwin install pyaudio`.
 - **„Zugangsschlüssel wird abgelehnt“:** Den Key in `.env` bzw. bei Render prüfen (bei Anthropic auch, ob Guthaben da ist).
+- **„Fehler … Statuscode 400“:** Hinter dem Statuscode steht jetzt der genaue Grund. Häufigste Ursache: Ein `ANTHROPIC_API_KEY` ohne Guthaben ist eingetragen. Lass ihn bei Render leer und nutze den kostenlosen `GEMINI_API_KEY`. Sind beide eingetragen, wechselt JARVIS automatisch auf Gemini.
+- **Genaue Fehlerdetails ansehen:** Render → Dashboard → *jarvis* → **Logs** (auf dem PC: im schwarzen Fenster von `start-web.bat`).
 - **„Kostenloses Kontingent ausgeschöpft“:** Gemini erlaubt kostenlos nur eine begrenzte Zahl an Anfragen pro Minute und Tag. Kurz warten.
 - **Gemini-Modell wechseln:** `GEMINI_MODEL` setzen (z. B. `gemini-2.5-flash`). Standard ist automatisch das neueste Flash-Modell.
 - **ElevenLabs-Fehler (401/quota):** Key prüfen oder Kontingent aufgebraucht. Im kostenlosen Tarif sind die Zeichen pro Monat begrenzt.

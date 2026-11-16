@@ -213,7 +213,12 @@ app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 
 def main() -> None:
+    import logging
+
     import uvicorn
+
+    # Fehlerdetails erscheinen im Terminal bzw. bei Render unter "Logs"
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     parser = argparse.ArgumentParser(prog="jarvis.web", description="JARVIS Weboberfläche")
     parser.add_argument("--port", type=int, default=int(os.getenv("JARVIS_WEB_PORT", "8000")))
