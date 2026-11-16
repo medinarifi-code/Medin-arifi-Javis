@@ -106,8 +106,15 @@ class SessionBody(BaseModel):
     session: str = Field(min_length=8, max_length=100)
 
 
+class Attachment(BaseModel):
+    name: str = Field(default="datei", max_length=200)
+    type: str = Field(default="", max_length=120)
+    data: str = Field(max_length=12_000_000)
+
+
 class ChatBody(SessionBody):
-    text: str = Field(min_length=1, max_length=20000)
+    text: str = Field(default="", max_length=20000)
+    attachments: list[Attachment] = Field(default_factory=list, max_length=4)
 
 
 class LoginBody(BaseModel):
@@ -154,15 +161,30 @@ def chat(body: ChatBody, request: Request):
             events.put(None)
             return
         try:
+            uploads = []
+            if body.attachments:
+                from .uploads import UploadError, process
+
+                try:
+                    uploads = process(cfg.output_dir, [a.model_dump() for a in body.attachments])
+                except UploadError as e:
+                    events.put({"type": "error", "text": str(e)})
+                    return
+            text = body.text.strip() or (
+                "Was siehst du auf dem Bild? Beschreibe es kurz." if any(u.kind == "image" for u in uploads)
+                else "Bitte fasse die angehängte Datei kurz zusammen." if uploads else "")
+            if not text:
+                events.put({"type": "error", "text": "Bitte eine Nachricht eingeben."})
+                return
             try:
                 mailbox = session.mailbox()
             except MailError as e:
                 mailbox = None
                 events.put({"type": "status", "text": f"E-Mail nicht verfügbar: {e}"})
-            session.jarvis.ask(body.text,
+            session.jarvis.ask(text,
                                on_text=lambda t: events.put({"type": "text", "text": t}),
                                on_status=lambda s: events.put({"type": "status", "text": s}),
-                               on_event=events.put, mailbox=mailbox)
+                               on_event=events.put, mailbox=mailbox, uploads=uploads)
             auth = session.outlook
             if auth is not None and auth.connected and auth.changed():
                 events.put({"type": "mail_token", "token": auth.export()})

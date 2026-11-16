@@ -1,13 +1,14 @@
-"""Datei-Werkzeuge: Dateien erstellen, lesen, auflisten, öffnen."""
+"""Datei-Grundlagen: sichere Pfade, Text-Dateien erstellen, Dateien lesen und auflisten.
+
+Alle Pfade sind auf den JARVIS-Ordner (output_dir) begrenzt - die KI kann weder außerhalb
+schreiben noch lesen (wichtig auf dem Server, wo Zugangsdaten liegen).
+"""
 
 from __future__ import annotations
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
-MAX_READ_CHARS = 100_000
+READ_CHUNK = 12_000  # Zeichen pro read_file-Aufruf
 
 
 class ToolError(Exception):
@@ -15,37 +16,45 @@ class ToolError(Exception):
 
 
 class ToolResult(str):
-    """Werkzeug-Ergebnis (Text für die KI) mit optionaler Datei bzw. URL für die Oberfläche."""
+    """Werkzeug-Ergebnis (Text für die KI) mit optionaler Datei für die Oberfläche."""
 
     file: Path | None
-    url: str | None
-    action: str | None
 
-    def __new__(cls, text: str, file: Path | None = None, url: str | None = None, action: str | None = None):
+    def __new__(cls, text: str, file: Path | None = None):
         obj = super().__new__(cls, text)
-        obj.file, obj.url, obj.action = file, url, action
+        obj.file = file
         return obj
 
 
 def safe_path(output_dir: Path, filename: str, default_suffix: str | None = None) -> Path:
-    """Löst einen Dateinamen innerhalb des Ausgabeordners auf.
-
-    Verhindert, dass die KI außerhalb des JARVIS-Ordners schreibt ("..", absolute Pfade).
-    """
-    if not filename or not filename.strip():
+    """Zielpfad innerhalb des JARVIS-Ordners (verhindert '..' und absolute Pfade)."""
+    if not filename or not str(filename).strip():
         raise ToolError("Es wurde kein Dateiname angegeben.")
     root = output_dir.resolve()
-    target = (root / filename.strip()).resolve()
-    if not target.is_relative_to(root):
-        raise ToolError(f"Dateien dürfen nur im Ordner {root} gespeichert werden.")
+    target = (root / str(filename).strip().lstrip("/\\")).resolve()
+    if not target.is_relative_to(root) or target == root:
+        raise ToolError("Dateien dürfen nur im JARVIS-Ordner gespeichert werden.")
     if default_suffix and target.suffix.lower() != default_suffix:
         target = target.with_name(target.name + default_suffix)
     target.parent.mkdir(parents=True, exist_ok=True)
     return target
 
 
+def existing_path(output_dir: Path, path: str) -> Path:
+    """Vorhandene Datei im JARVIS-Ordner (z. B. 'uploads/foto.jpg')."""
+    if not path or not str(path).strip():
+        raise ToolError("Es wurde kein Dateipfad angegeben.")
+    root = output_dir.resolve()
+    p = (root / str(path).strip().lstrip("/\\")).resolve()
+    if not p.is_relative_to(root):
+        raise ToolError("Es können nur Dateien aus dem JARVIS-Ordner gelesen werden.")
+    if not p.is_file():
+        raise ToolError(f"Die Datei '{path}' gibt es nicht. Mit list_files siehst du alle Dateien.")
+    return p
+
+
 def unique(path: Path) -> Path:
-    """Hängt (2), (3) ... an, falls die Datei schon existiert."""
+    """Hängt (2), (3) … an, falls die Datei schon existiert."""
     if not path.exists():
         return path
     i = 2
@@ -56,41 +65,46 @@ def unique(path: Path) -> Path:
         i += 1
 
 
-def _resolve_existing(output_dir: Path, path: str) -> Path:
-    p = Path(path).expanduser()
-    if not p.is_absolute():
-        p = output_dir / p
-    p = p.resolve()
-    if not p.exists():
-        raise ToolError(f"Die Datei {p} existiert nicht.")
-    return p
+def rel(output_dir: Path, path: Path) -> str:
+    return path.resolve().relative_to(output_dir.resolve()).as_posix()
 
 
-def create_file(output_dir: Path, filename: str, content: str, overwrite: bool = False) -> str:
-    path = safe_path(output_dir, filename)
-    if not overwrite:
-        path = unique(path)
+def create_file(output_dir: Path, filename: str, content: str) -> ToolResult:
+    path = unique(safe_path(output_dir, filename))
     path.write_text(content, encoding="utf-8")
-    return ToolResult(f"Datei gespeichert: {path}", file=path)
+    return ToolResult(f"Datei gespeichert: {rel(output_dir, path)}", file=path)
 
 
-def read_file(output_dir: Path, path: str) -> str:
-    p = _resolve_existing(output_dir, path)
+def extract_text(p: Path) -> str:
+    """Text aus Dokumenten (PDF, Word, Excel, PowerPoint, Text/Code)."""
     suffix = p.suffix.lower()
+    if suffix == ".pdf":
+        from pypdf import PdfReader
+
+        reader = PdfReader(str(p))
+        pages = [f"--- Seite {i} ---\n{(page.extract_text() or '').strip()}" for i, page in enumerate(reader.pages, 1)]
+        text = "\n".join(pages)
+        if not text.replace("--- Seite", "").strip(" -0123456789\n"):
+            return "(Dieses PDF enthält keinen lesbaren Text – vermutlich eingescannte Bilder.)"
+        return text
     if suffix == ".pptx":
         from pptx import Presentation
 
-        prs = Presentation(str(p))
         parts = []
-        for i, slide in enumerate(prs.slides, 1):
+        for i, slide in enumerate(Presentation(str(p)).slides, 1):
             texts = [sh.text_frame.text for sh in slide.shapes if sh.has_text_frame and sh.text_frame.text.strip()]
             parts.append(f"--- Folie {i} ---\n" + "\n".join(texts))
-        text = "\n".join(parts)
-    elif suffix == ".docx":
+        return "\n".join(parts)
+    if suffix == ".docx":
         from docx import Document
 
-        text = "\n".join(par.text for par in Document(str(p)).paragraphs)
-    elif suffix == ".xlsx":
+        doc = Document(str(p))
+        lines = [par.text for par in doc.paragraphs]
+        for table in doc.tables:
+            for row in table.rows:
+                lines.append(" | ".join(c.text for c in row.cells))
+        return "\n".join(lines)
+    if suffix in (".xlsx", ".xlsm"):
         from openpyxl import load_workbook
 
         wb = load_workbook(str(p), data_only=True, read_only=True)
@@ -98,45 +112,32 @@ def read_file(output_dir: Path, path: str) -> str:
         for ws in wb.worksheets:
             parts.append(f"--- Blatt {ws.title} ---")
             for row in ws.iter_rows(values_only=True):
-                parts.append("\t".join("" if v is None else str(v) for v in row))
-        text = "\n".join(parts)
-    else:
-        try:
-            text = p.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            text = p.read_text(encoding="latin-1")
-    if len(text) > MAX_READ_CHARS:
-        text = text[:MAX_READ_CHARS] + f"\n\n[... gekürzt, Datei hat {len(text)} Zeichen ...]"
-    return text
+                if any(v is not None for v in row):
+                    parts.append("\t".join("" if v is None else str(v) for v in row))
+        return "\n".join(parts)
+    if suffix in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".mp3", ".zip"):
+        return f"({p.name} ist keine Textdatei – Größe {p.stat().st_size:,} Bytes.)".replace(",", ".")
+    try:
+        return p.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return p.read_text(encoding="latin-1")
 
 
-def list_files(output_dir: Path, folder: str | None = None) -> str:
-    base = _resolve_existing(output_dir, folder) if folder else output_dir.resolve()
-    if not base.is_dir():
-        raise ToolError(f"{base} ist kein Ordner.")
-    entries = sorted(base.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
-    if not entries:
-        return f"Der Ordner {base} ist leer."
-    lines = [f"Inhalt von {base}:"]
-    for e in entries[:200]:
-        if e.is_dir():
-            lines.append(f"[Ordner] {e.name}")
-        else:
-            lines.append(f"{e.name} ({e.stat().st_size:,} Bytes)".replace(",", "."))
-    return "\n".join(lines)
+def read_file(output_dir: Path, path: str, start: int = 0) -> str:
+    p = existing_path(output_dir, path)
+    text = extract_text(p)
+    start = max(0, int(start or 0))
+    part = text[start:start + READ_CHUNK]
+    end = start + len(part)
+    note = (f"\n\n[Zeichen {start}–{end} von {len(text)}. Weiterlesen mit read_file(path, start={end}).]"
+            if end < len(text) else "")
+    return part + note
 
 
-def open_path(output_dir: Path, path: str, client_side: bool = False) -> str:
-    p = _resolve_existing(output_dir, path)
-    if client_side:
-        # Web-Modus: Der Browser öffnet bzw. lädt die Datei.
-        if not p.is_file() or not p.is_relative_to(output_dir.resolve()):
-            raise ToolError("Im Web-Modus können nur Dateien aus dem JARVIS-Ordner geöffnet werden.")
-        return ToolResult(f"Datei wird im Browser bereitgestellt: {p.name}", file=p, action="open")
-    if sys.platform.startswith("win"):
-        os.startfile(str(p))  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(p)])
-    else:
-        subprocess.Popen(["xdg-open", str(p)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return f"Geöffnet: {p}"
+def list_files(output_dir: Path) -> str:
+    root = output_dir.resolve()
+    files = sorted((f for f in root.rglob("*") if f.is_file()), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not files:
+        return "Der JARVIS-Ordner ist noch leer."
+    return "Dateien (neueste zuerst):\n" + "\n".join(
+        f"- {rel(output_dir, f)} ({f.stat().st_size:,} Bytes)".replace(",", ".") for f in files[:60])

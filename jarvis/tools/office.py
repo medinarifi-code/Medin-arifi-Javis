@@ -4,11 +4,40 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .files import ToolError, ToolResult, safe_path, unique
+from .files import ToolError, ToolResult, existing_path, rel, safe_path, unique
 
 # ---------------------------------------------------------------------------
 # PowerPoint im "Stark Industries"-HUD-Stil
 # ---------------------------------------------------------------------------
+
+IMAGE_TYPES = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp")
+
+
+def image_file(output_dir: Path, path: str | None) -> tuple[Path, int, int] | None:
+    """Bild aus dem JARVIS-Ordner (z. B. 'uploads/foto.jpg') als (Pfad, Breite, Höhe); WebP wird zu PNG."""
+    if not path:
+        return None
+    p = existing_path(output_dir, path)
+    from PIL import Image
+
+    try:
+        with Image.open(p) as im:
+            w, h = im.size
+            if p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".gif", ".bmp"):  # z. B. WebP für Office umwandeln
+                conv = p.with_suffix(".office.png")
+                im.convert("RGBA").save(conv)
+                p = conv
+    except Exception as e:  # noqa: BLE001
+        raise ToolError(f"'{path}' ist kein lesbares Bild ({e}).") from e
+    return p, w, h
+
+
+def fit(x, y, w, h, img_w, img_h):
+    """Bild unverzerrt in ein Rechteck einpassen (zentriert)."""
+    scale = min(w / img_w, h / img_h)
+    nw, nh = int(img_w * scale), int(img_h * scale)
+    return x + (w - nw) // 2, y + (h - nh) // 2, nw, nh
+
 
 THEMES = {
     "jarvis": {  # dunkel, Arc-Reactor-Blau
@@ -127,6 +156,7 @@ def create_pptx(output_dir: Path, filename: str, title: str, slides: list[dict],
         layout = (data.get("layout") or "bullets").lower()
         heading = data.get("title") or ""
         points = [str(b) for b in (data.get("bullets") or [])]
+        img = image_file(output_dir, data.get("image"))
 
         if layout == "section":
             rect(s, 0, 0, Inches(0.25), H, t["accent"])
@@ -164,16 +194,27 @@ def create_pptx(output_dir: Path, filename: str, title: str, slides: list[dict],
             if len(points) > 1:
                 textbox(s, Inches(1.5), Inches(5.1), Inches(10.3), Inches(0.6), f"— {points[1]}", 20, t["accent"],
                         align=PP_ALIGN.CENTER)
+        elif img and (layout == "image" or not points):
+            x, y, w, h = fit(Inches(0.9), Inches(1.9), Inches(11.5), Inches(4.9), img[1], img[2])
+            s.shapes.add_picture(str(img[0]), x, y, w, h)
+            if points:
+                textbox(s, Inches(0.9), Inches(6.7), Inches(11.5), Inches(0.5), points[0], 14, t["muted"],
+                        align=PP_ALIGN.CENTER)
         else:
             size = 24 if len(points) <= 4 else 20 if len(points) <= 6 else 16
-            bullets(s, Inches(0.9), Inches(1.95), Inches(11.5), Inches(4.8), points, size=size)
+            if img:  # Stichpunkte links, Bild rechts
+                bullets(s, Inches(0.9), Inches(1.95), Inches(6.4), Inches(4.8), points, size=min(size, 20))
+                x, y, w, h = fit(Inches(7.6), Inches(1.95), Inches(5.0), Inches(4.8), img[1], img[2])
+                s.shapes.add_picture(str(img[0]), x, y, w, h)
+            else:
+                bullets(s, Inches(0.9), Inches(1.95), Inches(11.5), Inches(4.8), points, size=size)
 
         footer(s, n)
         notes(s, data.get("notes"))
 
     path = unique(safe_path(output_dir, filename, ".pptx"))
     prs.save(str(path))
-    return ToolResult(f"Präsentation mit {len(slides) + 1} Folien gespeichert: {path}", file=path)
+    return ToolResult(f"Präsentation mit {len(slides) + 1} Folien gespeichert: {rel(output_dir, path)}", file=path)
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +223,7 @@ def create_pptx(output_dir: Path, filename: str, title: str, slides: list[dict],
 
 def create_docx(output_dir: Path, filename: str, title: str, sections: list[dict]) -> str:
     from docx import Document
-    from docx.shared import Pt
+    from docx.shared import Inches, Pt
 
     doc = Document()
     style = doc.styles["Normal"]
@@ -196,9 +237,13 @@ def create_docx(output_dir: Path, filename: str, title: str, sections: list[dict
             doc.add_paragraph(str(para))
         for item in sec.get("bullets") or []:
             doc.add_paragraph(str(item), style="List Bullet")
+        img = image_file(output_dir, sec.get("image"))
+        if img:
+            width = 6.0 if img[1] >= img[2] else 6.0 * img[1] / img[2] * 0.8
+            doc.add_picture(str(img[0]), width=Inches(width))
     path = unique(safe_path(output_dir, filename, ".docx"))
     doc.save(str(path))
-    return ToolResult(f"Word-Dokument gespeichert: {path}", file=path)
+    return ToolResult(f"Word-Dokument gespeichert: {rel(output_dir, path)}", file=path)
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +275,7 @@ def create_xlsx(output_dir: Path, filename: str, sheets: list[dict]) -> str:
         ws.freeze_panes = "A2" if headers else None
     path = unique(safe_path(output_dir, filename, ".xlsx"))
     wb.save(str(path))
-    return ToolResult(f"Excel-Tabelle gespeichert: {path}", file=path)
+    return ToolResult(f"Excel-Tabelle gespeichert: {rel(output_dir, path)}", file=path)
 
 
 def _cell(v):

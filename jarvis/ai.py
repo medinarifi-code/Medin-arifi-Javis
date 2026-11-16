@@ -23,6 +23,9 @@ OnStatus = Callable[[str], None]
 # Ist ein Modell nicht verfügbar oder sein Gratis-Kontingent leer, nimmt JARVIS das nächste.
 DEFAULT_MODELS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
 SEARCH_MODELS = ["groq/compound-mini", "groq/compound"]
+# Modelle, die Bilder sehen können (werden beim ersten Bild mit der Modell-Liste von Groq abgeglichen)
+VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"]
+VISION_HINTS = ("llama-4", "vision", "-vl", "qwen3.6", "qwen-vl")
 MAX_STEPS = 15
 HISTORY_LIMIT = 16  # so bleibt jede Anfrage im kostenlosen Token-Limit
 
@@ -47,25 +50,55 @@ class Jarvis:
         self.history: list[dict] = []
         self.known_addresses: set[str] = set()
         self.tools_ok = True
+        self.vision_models: list[str] | None = None
+        self.vision = False  # aktuelle Anfrage enthält Bilder
 
     @property
     def model(self) -> str:
-        return self.models[0]
+        return self._active()[0]
+
+    def _active(self) -> list[str]:
+        if self.vision:
+            if self.vision_models is None:
+                self.vision_models = self._find_vision_models()
+            return self.vision_models
+        return self.models
+
+    def _find_vision_models(self) -> list[str]:
+        import os
+
+        wanted = [m for m in [os.getenv("GROQ_VISION_MODEL")] if m] + VISION_MODELS
+        try:
+            available = [m.id for m in self.client.models.list().data]
+        except Exception as e:  # noqa: BLE001 - Liste ist nur eine Hilfe
+            log.info("Modell-Liste nicht abrufbar: %s", e)
+            return wanted
+        found = [m for m in wanted if m in available]
+        found += [m for m in available if any(h in m.lower() for h in VISION_HINTS) and m not in found]
+        log.info("Bild-Modelle: %s", found or wanted)
+        return found or wanted
 
     def reset(self) -> None:
         self.history.clear()
 
     # ------------------------------------------------------------------ öffentlich
-    def ask(self, text: str, on_text: OnText, on_status: OnStatus, on_event=None, mailbox=None) -> None:
+    def ask(self, text: str, on_text: OnText, on_status: OnStatus, on_event=None, mailbox=None, uploads=None) -> None:
         if not self.cfg.groq_api_key:
             on_text("Mir fehlt noch der kostenlose GROQ_API_KEY. Bitte bei Render unter Environment eintragen.")
             return
+        uploads = uploads or []
         ctx = ToolContext(output_dir=self.cfg.output_dir, mailbox=mailbox, user_message=text,
                           known_addresses=self.known_addresses, on_event=on_event)
         checkpoint = len(self.history)
-        self.history.append({"role": "user", "content": text})
+        self.history.append({"role": "user", "content": self._user_content(text, uploads)})
+        self.vision = any(u.kind == "image" for u in uploads)
+        self.tools_ok = True
         try:
             self._run(ctx, on_text, on_status)
+            if uploads and checkpoint < len(self.history):
+                # Verlauf schlank halten: Bilder/lange Texte durch kurze Hinweise ersetzen
+                self.history[checkpoint] = {"role": "user", "content": "\n\n".join(
+                    [text, *(u.history_part() for u in uploads)])}
         except groq.APIError as e:
             log.error("Groq-Fehler (%s): %s", self.model, short_error(str(e), 500))
             del self.history[checkpoint:]
@@ -74,6 +107,19 @@ class Jarvis:
             log.exception("Unerwarteter Fehler")
             del self.history[checkpoint:]
             on_text(f"Da ist etwas schiefgelaufen ({type(e).__name__}: {short_error(str(e), 100)}). Bitte noch einmal versuchen.")
+        finally:
+            self.vision = False
+
+    @staticmethod
+    def _user_content(text: str, uploads: list):
+        if not uploads:
+            return text
+        full = "\n\n".join([text, *(u.prompt_part() for u in uploads)])
+        images = [u for u in uploads if u.kind == "image"]
+        if not images:
+            return full
+        return [{"type": "text", "text": full},
+                *({"type": "image_url", "image_url": {"url": u.data_url}} for u in images)]
 
     # ------------------------------------------------------------------ Anfrage bauen
     def _messages(self, ctx: ToolContext) -> list[dict]:
@@ -115,9 +161,11 @@ class Jarvis:
             time.sleep(2)
             raise _Retry
         model_gone = status == 404 or "decommissioned" in low or "does not exist" in low or "model_not_found" in low
-        if (isinstance(e, groq.RateLimitError) or model_gone) and len(self.models) > 1:
-            log.warning("Modell %s nicht nutzbar (%s) - nehme %s", self.model, status, self.models[1])
-            self.models.pop(0)
+        no_images = self.vision and status == 400 and ("image" in low or "vision" in low or "multimodal" in low)
+        active = self._active()
+        if (isinstance(e, groq.RateLimitError) or model_gone or no_images) and len(active) > 1:
+            log.warning("Modell %s nicht nutzbar (%s) - nehme %s", active[0], status, active[1])
+            active.pop(0)
             raise _Retry
         if status == 413 or "too large" in low or "context_length" in low or "reduce the length" in low:
             if not state.get("trimmed"):
@@ -129,8 +177,8 @@ class Jarvis:
             state["tool_fail"] = tries
             if tries == 1:
                 raise _Retry
-            if tries == 2 and len(self.models) > 1:
-                self.models.pop(0)
+            if tries == 2 and len(self._active()) > 1:
+                self._active().pop(0)
                 raise _Retry
             if self.tools_ok:
                 log.warning("Werkzeug-Aufrufe scheitern - antworte ohne Werkzeuge")

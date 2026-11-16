@@ -87,13 +87,31 @@ body.thinking .orb { animation: pulse 1s ease-in-out infinite; }
 /* ---------- Eingabe ---------- */
 .bar { position: relative; display: flex; align-items: flex-end; gap: 10px; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .interim { position: absolute; left: 16px; right: 16px; bottom: 100%; padding: 6px 0; color: var(--gold); font-style: italic; font-size: 14px; }
-.composer { flex: 1; display: flex; align-items: flex-end; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 4px 4px 4px 14px; }
+.composer { flex: 1; display: flex; align-items: flex-end; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 4px 4px 4px 4px; }
 .composer:focus-within { border-color: var(--accent); }
 .composer textarea { flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; padding: 9px 0; max-height: 140px; }
 .send { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--accent); color: var(--accent-ink); font-size: 16px; flex: none; }
 .send:disabled { opacity: .4; }
 .mic { width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface2); font-size: 22px; flex: none; }
 body.listening .mic { background: var(--gold); border-color: var(--gold); box-shadow: 0 0 20px rgba(251, 191, 36, .6); }
+
+/* ---------- Anhänge ---------- */
+.bar { flex-wrap: wrap; }
+.strip { flex-basis: 100%; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.att { position: relative; flex: none; width: 64px; height: 64px; border-radius: 12px; border: 1px solid var(--line);
+       background: var(--surface2); display: grid; place-items: center; overflow: hidden; font-size: 11px; text-align: center; padding: 4px; color: var(--muted); }
+.att img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.att .x { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; border-radius: 50%; border: 0; background: rgba(0,0,0,.7); color: #fff; font-size: 11px; padding: 0; line-height: 20px; }
+.att.loading { opacity: .5; }
+.attach { width: 34px; height: 38px; border: 0; background: transparent; font-size: 19px; padding: 0; flex: none; }
+.msg .thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; justify-content: flex-end; }
+.msg .thumbs img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; }
+.msg .thumbs span { background: rgba(4, 32, 42, .15); border-radius: 8px; padding: 4px 8px; font-size: 13px; }
+.card.pic { flex-direction: column; align-items: stretch; padding: 8px; }
+.card.pic img { width: 100%; border-radius: 10px; display: block; background: var(--bg); }
+.card.pic .row2 { display: flex; align-items: center; gap: 8px; padding: 4px 4px 0; }
+.card.pic .row2 .title { flex: 1; }
+body.dragging .log { outline: 2px dashed var(--accent); outline-offset: -8px; }
 
 /* ---------- E-Mail-Dialog ---------- */
 .sheet { width: min(460px, calc(100% - 24px)); border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--text); padding: 18px; }
@@ -108,3 +126,7 @@ body.listening .mic { background: var(--gold); border-color: var(--gold); box-sh
 .sheet a { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* Korrekturen Anhänge/Bildkarten */
+.card.pic .imglink { background: none; padding: 0; border-radius: 10px; }
+.composer { flex: 1 1 0; min-width: 0; }

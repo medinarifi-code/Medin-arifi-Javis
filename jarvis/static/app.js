@@ -54,6 +54,20 @@
   }
   function fileCard(name, url) {
     const ext = (name.split(".").pop() || "").toLowerCase();
+    if (["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(ext)) {
+      const card = document.createElement("div");
+      card.className = "card pic";
+      card.innerHTML = '<a class="imglink" target="_blank" rel="noopener"><img alt=""></a><div class="row2"><div class="title"></div><a class="dl">Laden</a></div>';
+      const src = withKey(url);
+      card.querySelector("img").src = src;
+      card.querySelector("img").alt = name;
+      card.querySelector(".imglink").href = src;
+      card.querySelector(".title").textContent = name;
+      const dl = card.querySelector(".dl"); dl.href = src; dl.download = name;
+      card.querySelector("img").onload = scroll;
+      log.append(card); scroll();
+      return;
+    }
     const el = document.createElement("div");
     el.className = "card";
     el.innerHTML = '<div class="badge"></div><div class="meta"><div class="title"></div><div class="sub">Zum Herunterladen bereit</div></div><a>Laden</a>';
@@ -179,12 +193,75 @@
   }
 
   // ------------------------------------------------------------ Chat
+  // ------------------------------------------------------------ Anhänge
+  const MAX_FILES = 4, MAX_DOC = 8 * 1024 * 1024;
+  let pending = [];
+  const IMG_RE = /^image\//;
+
+  function readAsDataURL(file) {
+    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+  }
+  async function shrinkImage(file) {
+    // Fotos verkleinern (max. 1600 px, JPEG) – schneller Upload, weniger Datenvolumen
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * scale); c.height = Math.round(img.naturalHeight * scale);
+      const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL("image/jpeg", 0.85);
+    } catch { return readAsDataURL(file); } finally { URL.revokeObjectURL(url); }
+  }
+  async function addFiles(list) {
+    for (const file of Array.from(list || [])) {
+      if (pending.length >= MAX_FILES) { bubble("jarvis", `Maximal ${MAX_FILES} Dateien pro Nachricht.`, "error"); break; }
+      const isImg = IMG_RE.test(file.type) || /\.(jpe?g|png|webp|gif|heic|bmp)$/i.test(file.name);
+      if (!isImg && file.size > MAX_DOC) { bubble("jarvis", `„${file.name}“ ist zu groß (max. 8 MB).`, "error"); continue; }
+      const item = { name: file.name || "foto.jpg", type: file.type, isImg, data: null, preview: isImg ? URL.createObjectURL(file) : null };
+      pending.push(item); renderStrip();
+      try { item.data = isImg ? await shrinkImage(file) : await readAsDataURL(file); }
+      catch { pending = pending.filter((p) => p !== item); bubble("jarvis", `„${file.name}“ konnte nicht gelesen werden.`, "error"); }
+      if (isImg && item.data) item.name = item.name.replace(/\.[^.]+$/, "") + ".jpg";
+      renderStrip();
+    }
+    input.focus();
+  }
+  function renderStrip() {
+    const strip = $("#strip");
+    strip.innerHTML = "";
+    strip.hidden = pending.length === 0;
+    pending.forEach((p) => {
+      const el = document.createElement("div");
+      el.className = "att" + (p.data ? "" : " loading");
+      if (p.preview) { const im = document.createElement("img"); im.src = p.preview; im.alt = p.name; el.append(im); }
+      else el.append(document.createTextNode("📄 " + p.name.slice(0, 18)));
+      const x = document.createElement("button");
+      x.className = "x"; x.type = "button"; x.textContent = "✕"; x.setAttribute("aria-label", p.name + " entfernen");
+      x.onclick = () => { pending = pending.filter((q) => q !== p); renderStrip(); };
+      el.append(x); strip.append(el);
+    });
+  }
+
   async function send(text) {
     text = (text || "").trim();
-    if (!text || busy) return;
+    if (busy || (!text && !pending.length)) return;
+    if (pending.some((p) => !p.data)) { bubble("jarvis", "Einen Moment – die Datei wird noch vorbereitet.", "error"); return; }
+    const attachments = pending.map((p) => ({ name: p.name, type: p.isImg ? "image/jpeg" : p.type, data: p.data }));
+    const shown = pending.map((p) => ({ name: p.name, preview: p.preview }));
+    pending = []; renderStrip();
     busy = true; $("#send").disabled = true;
     voice.stop();
-    bubble("user", text);
+    const ub = bubble("user", text || (shown.some((p) => p.preview) ? "📷" : "📄"));
+    if (shown.length) {
+      const t = document.createElement("div"); t.className = "thumbs";
+      shown.forEach((p) => {
+        if (p.preview) { const im = document.createElement("img"); im.src = p.preview; im.alt = p.name; t.append(im); }
+        else { const sp = document.createElement("span"); sp.textContent = "📄 " + p.name; t.append(sp); }
+      });
+      ub.prepend(t);
+    }
     refresh();
     let el = null;
     const sentences = new Sentences();
@@ -205,7 +282,7 @@
     try {
       const res = await fetch("/api/chat", {
         method: "POST", headers: headers({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ session: sessionId, text }),
+        body: JSON.stringify({ session: sessionId, text, attachments }),
       });
       if (res.status === 401) { showLogin(); throw new Error("Bitte erneut anmelden."); }
       if (!res.ok || !res.body) throw new Error("Server antwortet nicht (" + res.status + ")");
@@ -379,7 +456,14 @@
   $("#btn-new").addEventListener("click", newChat);
   $("#btn-mail").addEventListener("click", async () => { await loadMail(); renderMail(); dlg.showModal(); });
   $("#mail-close").addEventListener("click", () => dlg.close());
+  $("#attach").addEventListener("click", () => $("#file").click());
+  $("#file").addEventListener("change", (e) => { addFiles(e.target.files); e.target.value = ""; });
+  input.addEventListener("paste", (e) => { if (e.clipboardData?.files?.length) { e.preventDefault(); addFiles(e.clipboardData.files); } });
+  window.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); document.body.classList.add("dragging"); } });
+  window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+  window.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); document.body.classList.remove("dragging"); addFiles(e.dataTransfer.files); } });
   document.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => {
+    if (c.dataset.attach) { $("#file").click(); return; }
     const q = c.dataset.q;
     if (q.endsWith(" ")) { input.value = q; input.focus(); grow(); } else send(q);
   }));

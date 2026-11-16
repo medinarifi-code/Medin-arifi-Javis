@@ -121,8 +121,8 @@ def client(monkeypatch, tmp_path, password="pw123"):
     monkeypatch.setattr(server.cfg, "mail_address", None)
     monkeypatch.setattr(server.cfg, "ms_client_id", None)
 
-    def fake_ask(self, text, on_text, on_status, on_event=None, mailbox=None):
-        on_text("Antwort: " + text)
+    def fake_ask(self, text, on_text, on_status, on_event=None, mailbox=None, uploads=None):
+        on_text("Antwort: " + text + "".join(f" [{u.kind}:{u.path}]" for u in uploads or []))
         (tmp_path / "f.txt").write_text("x")
         on_event({"type": "file", "name": "f.txt", "url": "/files/f.txt"})
 
@@ -175,3 +175,57 @@ def test_mail_status_shows_setup_error_and_test(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "imap_mailbox", lambda: OkBox())
     r = c.post("/api/mail/test", json={"session": "abcdefgh2"}).json()
     assert r["ok"] is True and "erreichbar" in r["message"]
+
+
+# ---------------------------------------------------------------- Anhänge
+def _png_data_url():
+    import base64
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 30), (0, 120, 255)).save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def test_image_goes_to_vision_model_then_compacted(tmp_path):
+    from jarvis.uploads import save_attachment
+
+    up = save_attachment(tmp_path, "foto.png", _png_data_url())
+    j = jarvis(tmp_path, [[text_chunk("Ein blaues Bild.")], [text_chunk("Ja.")]])
+    j.client.models = NS(list=lambda: NS(data=[NS(id="llama-3.3-70b-versatile"),
+                                               NS(id="meta-llama/llama-4-scout-17b-16e-instruct")]))
+    out = []
+    j.ask("Was ist das?", out.append, lambda s: None, uploads=[up])
+    call = j.client.chat.completions.calls[0]
+    assert call["model"] == "meta-llama/llama-4-scout-17b-16e-instruct"
+    content = call["messages"][-1]["content"]
+    assert content[1]["type"] == "image_url" and content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert "uploads/foto.jpg" in content[0]["text"]
+    assert j.history[0]["content"] == "Was ist das?\n\n[Bild angehängt: uploads/foto.jpg]"
+    j.ask("Danke", out.append, lambda s: None)
+    assert j.client.chat.completions.calls[1]["model"] == "openai/gpt-oss-120b"  # Text wieder mit normalem Modell
+
+
+def test_document_text_in_prompt(tmp_path):
+    import base64
+
+    from jarvis.uploads import save_attachment
+
+    data = "data:text/plain;base64," + base64.b64encode("Geheimrezept: Pizza".encode()).decode()
+    up = save_attachment(tmp_path, "rezept.txt", data)
+    j = jarvis(tmp_path, [[text_chunk("Pizza.")]])
+    j.ask("Was steht drin?", lambda t: None, lambda s: None, uploads=[up])
+    msg = j.client.chat.completions.calls[0]["messages"][-1]["content"]
+    assert isinstance(msg, str) and "Geheimrezept: Pizza" in msg and "uploads/rezept.txt" in msg
+
+
+def test_chat_endpoint_with_attachment(monkeypatch, tmp_path):
+    c = client(monkeypatch, tmp_path, password="")
+    r = c.post("/api/chat", json={"session": "abcdefgh3", "text": "", "attachments": [{"name": "a.png", "type": "image/png", "data": _png_data_url()}]})
+    evs = [json.loads(l) for l in r.text.splitlines() if l]
+    assert "Was siehst du" in evs[0]["text"] and "[image:uploads/a.jpg]" in evs[0]["text"]
+    r = c.post("/api/chat", json={"session": "abcdefgh3", "text": "x", "attachments": [{"name": "virus.exe", "data": "data:application/octet-stream;base64,AAAA"}]})
+    evs = [json.loads(l) for l in r.text.splitlines() if l]
+    assert evs[0]["type"] == "error" and "nicht unterstützt" in evs[0]["text"]

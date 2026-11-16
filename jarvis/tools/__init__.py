@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import files, mail, office
+from . import files, mail, media, office
 from .files import ToolError, ToolResult
 
 S = {"type": "string"}
@@ -22,27 +22,32 @@ def obj(props: dict, required: list[str] | None = None) -> dict:
 
 FILE_TOOLS = [
     {"name": "create_file",
-     "description": "Erstellt eine Textdatei (.txt, .md, .py, .html, .csv, .json …) zum Download. Für Code, Texte, Listen.",
+     "description": ("Erstellt jede Art von Textdatei zum Download: .txt, .md, .html (Webseiten), .css, .js, .py und anderer "
+                     "Code, .csv, .json, .xml, .svg (Vektorgrafik), .ics (Kalendertermin), .vcf (Kontakt), .bat, .yaml …"),
      "parameters": obj({"filename": {**S, "description": "Dateiname mit Endung"},
                         "content": {**S, "description": "Vollständiger Inhalt"}}, ["filename", "content"])},
     {"name": "create_pptx",
      "description": ("Erstellt eine gestaltete PowerPoint-Präsentation (.pptx). Titelfolie entsteht automatisch. "
-                     "Layouts: bullets (Standard), two_column (bullets links, right_bullets rechts), "
-                     "section (Kapitelfolie), quote (bullets[0]=Zitat, bullets[1]=Quelle)."),
+                     "Layouts: bullets (Standard; mit image steht das Bild rechts), two_column (bullets links, right_bullets "
+                     "rechts), section (Kapitelfolie), quote (bullets[0]=Zitat, bullets[1]=Quelle), image (großes Bild, "
+                     "bullets[0]=Bildunterschrift). image = Pfad eines Bildes im JARVIS-Ordner, z. B. uploads/foto.jpg "
+                     "oder ein mit create_image erzeugtes Bild."),
      "parameters": obj({
          "filename": S, "title": S, "subtitle": S,
          "theme": {"type": "string", "enum": ["jarvis", "ironman", "hell"], "description": "Design"},
          "slides": {"type": "array", "items": obj({
              "title": S,
-             "layout": {"type": "string", "enum": ["bullets", "two_column", "section", "quote"]},
+             "layout": {"type": "string", "enum": ["bullets", "two_column", "section", "quote", "image"]},
              "bullets": S_LIST, "left_title": S, "right_title": S, "right_bullets": S_LIST,
+             "image": {**S, "description": "optional: Bildpfad, z. B. uploads/foto.jpg"},
              "notes": {**S, "description": "Sprechernotizen"},
          }, ["title", "bullets"])},
      }, ["filename", "title", "slides"])},
     {"name": "create_docx",
-     "description": "Erstellt ein Word-Dokument (.docx) mit Überschriften, Absätzen und Aufzählungen (Briefe, Berichte, Referate).",
+     "description": "Erstellt ein Word-Dokument (.docx) mit Überschriften, Absätzen, Aufzählungen und Bildern (Briefe, Berichte, Referate).",
      "parameters": obj({"filename": S, "title": S,
-                        "sections": {"type": "array", "items": obj({"heading": S, "paragraphs": S_LIST, "bullets": S_LIST})}},
+                        "sections": {"type": "array", "items": obj({"heading": S, "paragraphs": S_LIST, "bullets": S_LIST,
+                                                                    "image": {**S, "description": "optional: Bildpfad"}})}},
                        ["filename", "title", "sections"])},
     {"name": "create_xlsx",
      "description": "Erstellt eine Excel-Tabelle (.xlsx). Zellen als Text; Zahlen werden erkannt, Formeln mit '=' beginnen.",
@@ -51,7 +56,46 @@ FILE_TOOLS = [
                             "name": S, "headers": S_LIST,
                             "rows": {"type": "array", "items": S_LIST}}, ["name", "rows"])}},
                        ["filename", "sheets"])},
-    {"name": "list_files", "description": "Listet die bereits erstellten Dateien auf.", "parameters": None},
+    {"name": "create_pdf",
+     "description": "Erstellt ein PDF-Dokument mit Überschriften, Absätzen, Aufzählungen, Tabellen und Bildern.",
+     "parameters": obj({"filename": S, "title": S,
+                        "sections": {"type": "array", "items": obj({
+                            "heading": S, "paragraphs": S_LIST, "bullets": S_LIST,
+                            "table": {"type": "array", "items": S_LIST, "description": "Zeilen; erste Zeile = Kopfzeile"},
+                            "image": {**S, "description": "optional: Bildpfad"}})}},
+                       ["filename", "title", "sections"])},
+    {"name": "create_chart",
+     "description": "Erstellt ein Diagramm als PNG-Bild (Balken, Linie, Kreis, Punkte).",
+     "parameters": obj({"filename": S, "chart_type": {"type": "string", "enum": ["bar", "line", "pie", "scatter"]},
+                        "title": S, "labels": {**S_LIST, "description": "Beschriftungen der x-Achse bzw. Kreisstücke"},
+                        "series": {"type": "array", "items": obj({"name": S, "values": {"type": "array", "items": {"type": "number"}}},
+                                                                 ["values"])},
+                        "x_label": S, "y_label": S}, ["filename", "chart_type", "title", "labels", "series"])},
+    {"name": "create_image",
+     "description": ("Malt ein neues Bild mit KI (Foto, Illustration, Logo, Hintergrund …). prompt am besten auf Englisch "
+                     "und detailliert (Motiv, Stil, Licht, Farben). Dauert 10-60 Sekunden."),
+     "parameters": obj({"prompt": S, "filename": S, "width": {"type": "integer"}, "height": {"type": "integer"}},
+                       ["prompt"])},
+    {"name": "create_qr", "description": "Erstellt einen QR-Code (PNG) für Link, Text, Telefonnummer oder WLAN.",
+     "parameters": obj({"filename": S, "content": S}, ["content"])},
+    {"name": "create_audio", "description": "Erstellt eine MP3-Datei, in der ein Text vorgelesen wird.",
+     "parameters": obj({"filename": S, "text": S, "lang": {**S, "description": "Sprache, z. B. de, en, fr"}}, ["text"])},
+    {"name": "edit_image",
+     "description": ("Bearbeitet oder wandelt ein Bild aus dem JARVIS-Ordner um (z. B. ein hochgeladenes Foto): Größe, "
+                     "Drehen, Schwarz-Weiß, Spiegeln, Zuschneiden, Helligkeit/Kontrast. Das Format ergibt sich aus der "
+                     "Endung von filename (.png, .jpg, .webp, .gif, .bmp, .pdf)."),
+     "parameters": obj({"path": S, "filename": S, "width": {"type": "integer"}, "height": {"type": "integer"},
+                        "rotate": {"type": "number", "description": "Grad im Uhrzeigersinn"},
+                        "grayscale": {"type": "boolean"}, "mirror": {"type": "boolean"}, "flip": {"type": "boolean"},
+                        "crop": {**S, "description": "links,oben,rechts,unten in Prozent, z. B. 10,10,90,90"},
+                        "brightness": {"type": "number", "description": "1 = normal, 1.3 = heller"},
+                        "contrast": {"type": "number", "description": "1 = normal"}}, ["path", "filename"])},
+    {"name": "create_zip", "description": "Packt mehrere Dateien aus dem JARVIS-Ordner in ein ZIP-Archiv.",
+     "parameters": obj({"filename": S, "files": S_LIST}, ["files"])},
+    {"name": "read_file",
+     "description": "Liest eine hochgeladene oder erstellte Datei (PDF, Word, Excel, PowerPoint, Text, Code). Lange Dateien abschnittsweise mit start.",
+     "parameters": obj({"path": {**S, "description": "z. B. uploads/vertrag.pdf"}, "start": {"type": "integer"}}, ["path"])},
+    {"name": "list_files", "description": "Listet alle Dateien im JARVIS-Ordner auf (erstellte und hochgeladene).", "parameters": None},
 ]
 
 MAIL_TOOLS = [
@@ -97,13 +141,16 @@ def tool_definitions(mail_connected: bool) -> list[dict]:
 LABELS = {
     "create_file": "Erstelle Datei", "create_pptx": "Erstelle Präsentation", "create_docx": "Erstelle Word-Dokument",
     "create_xlsx": "Erstelle Excel-Tabelle", "list_files": "Prüfe Dateien", "search_web": "Suche im Internet",
+    "create_pdf": "Erstelle PDF", "create_chart": "Zeichne Diagramm", "create_image": "Male Bild (dauert etwas)",
+    "create_qr": "Erstelle QR-Code", "create_audio": "Erstelle Audio", "edit_image": "Bearbeite Bild",
+    "create_zip": "Packe ZIP", "read_file": "Lese Datei",
     "list_emails": "Prüfe Posteingang", "search_emails": "Durchsuche Mails", "read_email": "Lese Mail",
     "reply_email": "Sende Antwort", "send_email": "Sende Mail",
 }
 
 
 def describe(name: str, args: dict) -> str:
-    detail = args.get("filename") or args.get("query") or args.get("to") or ""
+    detail = args.get("filename") or args.get("path") or args.get("query") or args.get("to") or ""
     return f"{LABELS.get(name, name)} {detail}".strip()
 
 
@@ -131,6 +178,34 @@ def execute(name: str, args: dict, ctx: ToolContext) -> str:
         result = office.create_xlsx(out, args["filename"], list(args["sheets"]))
     elif name == "list_files":
         result = files.list_files(out)
+    elif name == "read_file":
+        _req(args, "path")
+        result = files.read_file(out, str(args["path"]), args.get("start") or 0)
+    elif name == "create_pdf":
+        _req(args, "filename", "title")
+        result = media.create_pdf(out, args["filename"], args["title"], list(args.get("sections") or []))
+    elif name == "create_chart":
+        _req(args, "labels", "series")
+        result = media.create_chart(out, args.get("filename") or "diagramm", args.get("chart_type") or "bar",
+                                    args.get("title") or "", [str(x) for x in args["labels"]], list(args["series"]),
+                                    args.get("x_label") or "", args.get("y_label") or "")
+    elif name == "create_image":
+        _req(args, "prompt")
+        result = media.create_image(out, str(args["prompt"]), args.get("filename") or "", args.get("width") or 1024,
+                                    args.get("height") or 1024)
+    elif name == "create_qr":
+        _req(args, "content")
+        result = media.create_qr(out, args.get("filename") or "qr-code", str(args["content"]))
+    elif name == "create_audio":
+        _req(args, "text")
+        result = media.create_audio(out, args.get("filename") or "audio", str(args["text"]), args.get("lang") or "de")
+    elif name == "edit_image":
+        _req(args, "path", "filename")
+        keys = ("width", "height", "rotate", "grayscale", "mirror", "flip", "crop", "brightness", "contrast")
+        result = media.edit_image(out, str(args["path"]), str(args["filename"]), **{k: args.get(k) for k in keys})
+    elif name == "create_zip":
+        _req(args, "files")
+        result = media.create_zip(out, args.get("filename") or "dateien", [str(f) for f in args["files"]])
     elif name == "list_emails":
         result = mail.list_emails(ctx, args.get("unread_only", False), args.get("limit", 10))
     elif name == "search_emails":

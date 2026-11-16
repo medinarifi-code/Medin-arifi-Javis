@@ -54,13 +54,19 @@
           <button class="chip" data-q="Erstelle mir eine Präsentation über ">📊 Präsentation</button>
           <button class="chip" data-q="Was sind die wichtigsten Nachrichten heute?">📰 Nachrichten</button>
           <button class="chip" data-q="Wie wird das Wetter heute?">🌤️ Wetter</button>
+          <button class="chip" data-q="Male mir ein Bild von ">🎨 Bild malen</button>
+          <button class="chip" data-attach="1">📷 Foto/Datei schicken</button>
         </div>
       </div>
     </main>
 
     <footer class="bar">
       <div id="interim" class="interim"></div>
+      <div id="strip" class="strip" hidden></div>
       <form id="composer" class="composer" autocomplete="off">
+        <button type="button" id="attach" class="attach" aria-label="Datei oder Foto anhängen" title="Bild oder Datei anhängen">📎</button>
+        <input type="file" id="file" multiple hidden
+          accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.json,.html,.xml,.py,.js,.css,.ics,.vcf">
         <textarea id="input" rows="1" placeholder="Frag JARVIS …" aria-label="Nachricht"></textarea>
         <button type="submit" id="send" class="send" aria-label="Senden">➤</button>
       </form>

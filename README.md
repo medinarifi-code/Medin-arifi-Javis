@@ -71,7 +71,13 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
 ## So benutzt du JARVIS
 - **Sprechen:** 🎙️ antippen und reden. **🔁 Gesprächsmodus:** JARVIS hört nach jeder Antwort automatisch wieder zu.
 - **Mails:** „Habe ich neue Mails?“, „Was schreibt Max?“, „Antworte ihm, dass ich morgen Zeit habe“, „Schick eine Mail an lisa@web.de: …“
-- **Dateien:** „Erstelle eine Präsentation über Elektroautos mit 8 Folien“. Die Datei erscheint im Chat mit **Laden**-Knopf.
+- **Dateien erstellen:** „Erstelle eine Präsentation über Elektroautos mit 8 Folien“. Die Datei erscheint im Chat mit **Laden**-Knopf.
+  JARVIS kann: PowerPoint, Word, Excel, **PDF**, **Diagramme**, **KI-Bilder** („Male mir ein Bild von …“), **QR-Codes**,
+  **MP3** (Text vorlesen), **ZIP** sowie Webseiten (HTML), Code, CSV, JSON, SVG, Kalendertermine (.ics) und Kontakte (.vcf).
+- **Bilder & Dateien schicken:** 📎 im Eingabefeld antippen. Am iPhone geht auch direkt „Foto aufnehmen“, am PC Einfügen (Strg+V) oder Hineinziehen.
+  Bis zu 4 Dateien pro Nachricht: Fotos, Screenshots, PDF, Word, Excel, PowerPoint, Text.
+  Beispiele: „Was steht auf dem Foto?“, „Löse die Aufgabe auf dem Bild“, „Fasse das PDF zusammen“,
+  „Mach das Foto schwarz-weiß“, „Bau das Foto in eine Präsentation ein“.
 - **Neues Gespräch:** ＋ oben rechts
 
 ### Sicherheit beim Mailen
@@ -82,6 +88,9 @@ JARVIS sendet nur, wenn **du** es in deiner Nachricht verlangst („schick“, �
 - Schreib keine Passwörter o. Ä. in den Chat.
 - Render schläft nach 15 Minuten ohne Nutzung ein, der erste Aufruf danach dauert ca. 1 Minute.
 - Erstellte Dateien direkt herunterladen; nach einem Neustart sind sie weg.
+- KI-Bilder kommen kostenlos von Pollinations.ai. Ohne Konto geht ca. 1 Bild pro 15 Sekunden, eventuell mit kleinem Wasserzeichen.
+  Mit einem kostenlosen Konto auf <https://auth.pollinations.ai> den Token bei Render als `POLLINATIONS_TOKEN` eintragen.
+- Die Bildbeschreibung für KI-Bilder geht an Pollinations. Hochgeladene Fotos gehen nur an Groq (zum Ansehen).
 - Fehlerdetails: Render → jarvis → **Logs**.
 
 ## Auf dem eigenen PC (optional)
