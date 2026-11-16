@@ -195,3 +195,8 @@ body.listening .sp-state { color: var(--gold); }
   .sp-answer { font-size: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Sprechen: Knopfleiste kompakt */
+.sp-controls { flex-wrap: wrap; justify-content: center; gap: 8px 10px; }
+.sp-controls .btn { white-space: nowrap; padding: 8px 14px; }
+.switch span { white-space: nowrap; }

@@ -83,6 +83,11 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
   „Mach das Foto schwarz-weiß“, „Bau das Foto in eine Präsentation ein“.
 - **Neues Gespräch:** ＋ oben rechts
 
+- **Stimme:** JARVIS spricht mit einer natürlichen, tiefen Männerstimme (Microsoft „Conrad“, kostenlos, kein Key). Sie ist auch bei
+  Lautlos-Schalter am iPhone hörbar. Im Bereich **Sprechen** gibt es **„🔊 Stimme testen“**. Andere Stimme: bei Render `JARVIS_VOICE`
+  setzen, z. B. `de-DE-KillianNeural` (Mann) oder `de-DE-KatjaNeural` (Frau). Geht die Microsoft-Stimme mal nicht, spricht Google bzw. der Browser.
+- **Spracheingabe:** Kann der Browser selbst keine Sprache erkennen (z. B. als App auf dem Home-Bildschirm), nimmt JARVIS auf und
+  lässt es kostenlos von Groq (Whisper) erkennen – gleicher `GROQ_API_KEY`.
 - **Sperre:** Bei jedem Öffnen fragt JARVIS nach dem Passwort. War die App länger als 5 Minuten im Hintergrund, sperrt sie sich automatisch. 🔒 oben sperrt sofort.
 - **Dateien löschen:** 🗑️ an jeder Datei im Chat oder im Dateien-Fenster (Ordner-Symbol oben), dort auch „Alle löschen“.
 - **Design:** schlicht und modern, passt sich automatisch an Hell- oder Dunkelmodus deines Geräts an.

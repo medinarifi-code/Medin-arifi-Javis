@@ -16,7 +16,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -208,6 +208,47 @@ def chat(body: ChatBody, request: Request):
 
     return StreamingResponse(stream(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# --------------------------------------------------------------------------- Sprache
+from .tts import STT_MAX_BYTES, Speech, SpeechError, transcribe  # noqa: E402
+
+speech = Speech()
+_stt_client = None
+
+
+@app.get("/api/tts")
+async def tts(text: str = ""):
+    """Text → MP3 (natürliche Stimme). Der Browser spielt das mit einem <audio>-Element ab."""
+    if not text.strip():
+        raise HTTPException(400, "Kein Text")
+    try:
+        audio = await speech.synth(text)
+    except SpeechError as e:
+        raise HTTPException(503, "Stimme gerade nicht verfügbar") from e
+    return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/api/stt")
+async def stt(request: Request):
+    """Aufnahme (Roh-Daten im Body) → Text, mit Groq Whisper."""
+    global _stt_client
+    data = await request.body()
+    if len(data) > STT_MAX_BYTES:
+        raise HTTPException(413, "Aufnahme zu lang")
+    if not data:
+        raise HTTPException(400, "Leere Aufnahme")
+    if not cfg.groq_api_key:
+        raise HTTPException(503, "GROQ_API_KEY fehlt")
+    if _stt_client is None:
+        from groq import Groq
+
+        _stt_client = Groq(api_key=cfg.groq_api_key, max_retries=1, timeout=60)
+    try:
+        text = await asyncio.to_thread(transcribe, _stt_client, data, request.headers.get("content-type", ""))
+    except SpeechError as e:
+        raise HTTPException(502, "Spracherkennung gerade nicht verfügbar") from e
+    return {"text": text}
 
 
 @app.post("/api/reset")

@@ -160,30 +160,69 @@
     }
     flush() { const r = this.buf.trim(); this.buf = ""; return r ? [r] : []; }
   }
+  // Stimme: natürliche MP3-Stimme vom Server über EIN <audio>-Element.
+  // Das ist auf dem iPhone auch bei Lautlos-Schalter und in der Home-Bildschirm-App hörbar.
+  // Notlösung pro Satz: die Browserstimme (speechSynthesis).
   const voice = {
-    active: false, pending: 0, chosen: null, raf: 0, unlocked: false,
+    active: false, queue: [], current: null, el: new Audio(), unlocked: false, raf: 0, usedSynth: false, chosen: null,
     on() { return mode === "speak" || $("#btn-voice").getAttribute("aria-pressed") === "true"; },
-    pick() {
-      if (this.chosen || !("speechSynthesis" in window)) return this.chosen;
-      const de = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("de"));
-      this.chosen = de.find((v) => /natural|neural|online|premium|enhanced|siri/i.test(v.name)) || de[0] || null;
-      return this.chosen;
-    },
     unlock() {
-      if (this.unlocked || !("speechSynthesis" in window)) return;
+      if (this.unlocked) return;
       this.unlocked = true;
-      try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } catch { /* egal */ }
+      try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch { /* egal */ }
+      this.el.setAttribute("playsinline", "");
+      this.el.preload = "auto";
+      this.el.src = "silent.mp3";
+      const p = this.el.play();
+      if (p) p.then(() => this.el.pause()).catch(() => { this.unlocked = false; });
+      try { if ("speechSynthesis" in window) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } } catch { /* egal */ }
     },
-    say(text) {
+    say(text, force = false) {
       text = clean(text);
-      if (!text || !this.on() || !("speechSynthesis" in window)) return;
+      if (!text || (!force && !this.on())) return;
+      this.queue.push({ text });
+      this.prefetch();
+      if (!this.current) this.next();
+    },
+    prefetch() {
+      for (const it of this.queue.slice(0, 3)) {
+        if (!it.blob) it.blob = api("/api/tts?text=" + encodeURIComponent(it.text))
+          .then((r) => (r.ok ? r.blob() : null)).catch(() => null);
+      }
+    },
+    async next() {
+      const item = this.queue.shift();
+      if (!item) { this.current = null; this.done(); return; }
+      this.current = item;
+      if (!this.active) { this.active = true; this.pulse(); refresh(); }
+      this.prefetch();
+      const finish = () => { if (this.current === item) { this.current = null; this.next(); } };
+      const blob = item.blob ? await item.blob : null;
+      if (this.current !== item) return;               // inzwischen gestoppt
+      if (blob && blob.size > 100) {
+        const url = URL.createObjectURL(blob);
+        this.el.onended = () => { URL.revokeObjectURL(url); finish(); };
+        this.el.onerror = () => { URL.revokeObjectURL(url); this.synth(item.text, finish); };
+        this.el.src = url;
+        try { await this.el.play(); return; } catch { URL.revokeObjectURL(url); }
+      }
+      this.synth(item.text, finish);
+    },
+    synth(text, done) {
+      this.el.onended = this.el.onerror = null;
+      if (!("speechSynthesis" in window)) { done(); return; }
+      this.usedSynth = true;
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "de-DE"; u.rate = 1.05;
-      const v = this.pick(); if (v) u.voice = v;
-      const end = () => { this.pending = Math.max(0, this.pending - 1); if (!this.pending) this.done(); };
+      if (!this.chosen) {
+        const de = speechSynthesis.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith("de"));
+        this.chosen = de.find((v) => /natural|neural|online|premium|enhanced|siri/i.test(v.name)) || de[0] || null;
+      }
+      if (this.chosen) u.voice = this.chosen;
+      let ended = false;
+      const end = () => { if (!ended) { ended = true; done(); } };
       u.onend = end; u.onerror = end;
-      this.pending++;
-      if (!this.active) { this.active = true; this.pulse(); refresh(); }
+      setTimeout(end, 4000 + text.length * 120);   // falls der Browser nie "fertig" meldet
       speechSynthesis.speak(u);
     },
     pulse() {
@@ -193,9 +232,15 @@
       };
       this.raf = requestAnimationFrame(tick);
     },
-    stop() { if ("speechSynthesis" in window) speechSynthesis.cancel(); this.pending = 0; this.done(); },
+    stop() {
+      this.queue = []; this.current = null;
+      this.el.onended = this.el.onerror = null;
+      try { this.el.pause(); } catch { /* egal */ }
+      if (this.usedSynth && "speechSynthesis" in window) { speechSynthesis.cancel(); this.usedSynth = false; }
+      this.done();
+    },
     done() {
-      if (!this.active) return;
+      if (!this.active || this.current || this.queue.length) return;
       this.active = false;
       document.documentElement.style.setProperty("--level", "0");
       refresh(); listenAgain();
@@ -204,46 +249,119 @@
   if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => { voice.chosen = null; };
 
   // ============================================================ Mikrofon
+  // Normal: Spracherkennung des Browsers. Ersatz (z. B. iPhone-Home-Bildschirm-App):
+  // Aufnahme mit MediaRecorder → Groq Whisper auf dem Server (/api/stt).
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function heard(t) {
+    t = (t || "").trim();
+    $("#interim").textContent = "";
+    refresh();
+    if (mode === "write") {  // Chat: Diktat landet im Eingabefeld
+      if (t) { input.value = (input.value ? input.value.trimEnd() + " " : "") + t; grow(); input.focus(); }
+      return;
+    }
+    if (t) send(t); else listenAgain();
+  }
+  function showLive(text) {
+    if (mode === "speak") { $("#sp-user").textContent = text; $("#sp-answer").textContent = ""; }
+    else $("#interim").textContent = text;
+  }
+
+  const rec = {
+    active: false, mr: null, stream: null, ctx: null, cancelled: false,
+    supported: !!(navigator.mediaDevices?.getUserMedia && window.MediaRecorder),
+    async start() {
+      this.cancelled = false;
+      try { this.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch { jarvisBubble("Kein Zugriff aufs Mikrofon. Bitte in den Einstellungen erlauben.", "error"); $("#sp-auto").checked = false; return; }
+      const types = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
+      const mime = types.find((t) => window.MediaRecorder.isTypeSupported?.(t)) || "";
+      const mr = new MediaRecorder(this.stream, mime ? { mimeType: mime } : undefined);
+      const chunks = [];
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      mr.onstop = async () => {
+        this.stream?.getTracks().forEach((t) => t.stop());
+        try { this.ctx?.close(); } catch { /* egal */ }
+        this.active = false; this.mr = null;
+        const blob = new Blob(chunks, { type: mr.mimeType || mime || "audio/webm" });
+        if (this.cancelled || blob.size < 1500) { refresh(); if (!this.cancelled) listenAgain(); return; }
+        showLive("Erkenne Sprache …"); setState("thinking");
+        let text = "";
+        try {
+          const r = await api("/api/stt", { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+          if (r.ok) text = (await r.json()).text || "";
+          else jarvisBubble("Ich konnte dich gerade nicht verstehen. Bitte nochmal.", "error");
+        } catch { jarvisBubble("Spracherkennung nicht erreichbar.", "error"); }
+        showLive(text);
+        heard(text);
+      };
+      this.mr = mr; this.active = true; refresh();
+      mr.start(250);
+      showLive("…");
+      // Satzende an Stille erkennen
+      try {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const an = this.ctx.createAnalyser(); an.fftSize = 1024;
+        this.ctx.createMediaStreamSource(this.stream).connect(an);
+        const buf = new Uint8Array(an.fftSize);
+        const t0 = Date.now(); let lastLoud = t0, spoke = false;
+        const tick = () => {
+          if (!this.active || this.mr !== mr) return;
+          an.getByteTimeDomainData(buf);
+          let sum = 0; for (const v of buf) { const x = (v - 128) / 128; sum += x * x; }
+          const rms = Math.sqrt(sum / buf.length), now = Date.now();
+          document.documentElement.style.setProperty("--level", Math.min(1, rms * 6).toFixed(2));
+          if (rms > 0.035) { lastLoud = now; spoke = true; }
+          if ((spoke && now - lastLoud > 1200) || now - t0 > 30000 || (!spoke && now - t0 > 8000)) { this.stop(); return; }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      } catch { setTimeout(() => this.stop(), 8000); }
+    },
+    stop() { if (this.mr && this.mr.state !== "inactive") this.mr.stop(); },
+    abort() { this.cancelled = true; this.stop(); },
+  };
+
   const recog = {
-    active: false, r: null, text: "",
+    r: null, srActive: false, text: "", useRec: !SR,
+    get active() { return this.srActive || rec.active; },
     start() {
-      if (!SR) { jarvisBubble("Spracheingabe geht in diesem Browser nicht. Bitte Safari, Chrome oder Edge verwenden – oder einfach tippen.", "error"); return; }
       if (this.active || busy) return;
       voice.stop();
+      if (this.useRec) {
+        if (rec.supported) { rec.start(); return; }
+        jarvisBubble("Spracheingabe geht in diesem Browser nicht – bitte tippen.", "error"); return;
+      }
       const r = new SR();
       r.lang = "de-DE"; r.interimResults = true; r.continuous = false;
       this.text = "";
+      let switchToRec = false;
       r.onresult = (e) => {
         let interim = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
           if (e.results[i].isFinal) this.text += e.results[i][0].transcript;
           else interim += e.results[i][0].transcript;
         }
-        const live = (this.text + " " + interim).trim();
-        if (mode === "speak") { $("#sp-user").textContent = live; $("#sp-answer").textContent = ""; }
-        else $("#interim").textContent = live;
+        showLive((this.text + " " + interim).trim());
       };
       r.onerror = (e) => {
-        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        if (e.error === "not-allowed") {
           jarvisBubble("Kein Zugriff aufs Mikrofon. Bitte in den Einstellungen erlauben.", "error");
           $("#sp-auto").checked = false;
+        } else if (["service-not-allowed", "network", "audio-capture", "language-not-supported"].includes(e.error) && rec.supported) {
+          this.useRec = true; switchToRec = true;   // Browser-Erkennung geht nicht → Server-Erkennung
         }
       };
       r.onend = () => {
-        this.active = false; this.r = null; $("#interim").textContent = "";
-        const t = this.text.trim(); refresh();
-        if (mode === "write") {  // Chat: Diktat landet im Eingabefeld
-          if (t) { input.value = (input.value ? input.value.trimEnd() + " " : "") + t; grow(); input.focus(); }
-          return;
-        }
-        if (t) send(t); else listenAgain();
+        this.srActive = false; this.r = null;
+        if (switchToRec) { refresh(); rec.start(); return; }
+        heard(this.text);
       };
-      this.r = r; this.active = true; refresh();
-      try { r.start(); } catch { this.active = false; refresh(); }
+      this.r = r; this.srActive = true; refresh();
+      try { r.start(); } catch { this.srActive = false; if (rec.supported) { this.useRec = true; rec.start(); } else refresh(); }
     },
-    stop() { this.r?.stop(); },
-    abort() { if (this.r) { this.text = ""; this.r.abort(); } },
+    stop() { if (this.r) this.r.stop(); else rec.stop(); },
+    abort() { if (this.r) { this.text = ""; this.r.abort(); } rec.abort(); },
   };
   const convOn = () => mode === "speak" && $("#sp-auto").checked;
   function listenAgain() {
@@ -660,6 +778,7 @@
   });
   $("#sp-orb").addEventListener("click", () => (recog.active ? recog.stop() : voice.active ? voice.stop() : recog.start()));
   $("#sp-stop").addEventListener("click", () => { recog.abort(); voice.stop(); refresh(); });
+  $("#sp-test").addEventListener("click", () => { recog.abort(); voice.stop(); voice.unlock(); voice.say("Hallo, ich bin JARVIS. Ich bin bereit.", true); });
   $("#sp-auto").addEventListener("change", (e) => { store.set("jarvis-auto", e.target.checked ? "1" : "0"); if (!e.target.checked) recog.abort(); });
   $("#mail-close").addEventListener("click", () => dlg.close());
   $("#files-close").addEventListener("click", () => $("#files-dialog").close());
