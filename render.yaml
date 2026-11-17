@@ -32,6 +32,21 @@ services:
         sync: false
       - key: MAIL_APP_PASSWORD
         sync: false
+      # Dauerhaftes Gedächtnis: Neon-Postgres (kostenlos, neon.tech) -> Connection String
+      - key: DATABASE_URL
+        sync: false
+      # Weitere KI-Anbieter (optional): Google Gemini (gratis), OpenAI, Anthropic, eigener Ollama-Server
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OLLAMA_URL
+        sync: false
+      # Geheimer Token für den externen Wecker (cron-job.org) -> /api/cron?token=...
+      - key: JARVIS_CRON_TOKEN
+        sync: false
       # Optional: kostenloses Pollinations-Konto (auth.pollinations.ai) -> schnellere KI-Bilder ohne Wasserzeichen
       - key: POLLINATIONS_TOKEN
         sync: false

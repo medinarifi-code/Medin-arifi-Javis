@@ -167,6 +167,8 @@ class DB:
             base.mkdir(parents=True, exist_ok=True)
             url = f"sqlite:///{base / 'jarvis.db'}"
         self.kind = "postgres" if url.startswith("postgresql") else "sqlite"
+        self.persistent = self.kind == "postgres"
+        self.error = ""
         kwargs: dict[str, Any] = {"pool_pre_ping": True}
         if self.kind == "sqlite":
             kwargs["connect_args"] = {"check_same_thread": False}

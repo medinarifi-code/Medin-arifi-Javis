@@ -248,8 +248,10 @@ class JarvisCore:
     def system_status(self) -> list[dict]:
         db_ok = self.db.ping()
         out = [{"id": "database", "label": "Datenbank", "ok": db_ok,
-                "detail": ("Neon/Postgres – dauerhaft" if self.db.persistent else "SQLite – geht bei Neustart verloren")
+                "detail": (self.db.error or ("Neon/Postgres – dauerhaft" if self.db.persistent else "SQLite – geht bei Neustart verloren"))
                 if db_ok else "nicht erreichbar"}]
+        if self.db.error:
+            out[0]["ok"] = False
         since = time.time() - 3600
         for p in self.registry.status():
             if not p["configured"]:

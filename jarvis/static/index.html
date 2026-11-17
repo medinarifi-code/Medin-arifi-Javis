@@ -4,11 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>JARVIS</title>
-  <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0b0c0f" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#030812">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icon-180.png">
@@ -16,14 +15,16 @@
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
+  <div class="bg-grid" aria-hidden="true"></div>
+
   <!-- ============ Sperrbildschirm ============ -->
   <section id="lock" class="lock">
-    <form id="lock-form" class="lock-card" autocomplete="off">
-      <div class="orb lg" aria-hidden="true"></div>
-      <h1>JARVIS</h1>
+    <form id="lock-form" class="lock-card glass" autocomplete="off">
+      <div class="reactor lg" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h1>J.A.R.V.I.S.</h1>
       <p id="lock-msg" class="muted">JARVIS startet …</p>
       <div id="lock-fields" hidden>
-        <input id="lock-pw" type="password" autocomplete="current-password" placeholder="Passwort" aria-label="Passwort">
+        <input id="lock-pw" type="password" autocomplete="current-password" placeholder="Zugangscode" aria-label="Passwort">
         <button type="submit" class="btn primary wide">Entsperren</button>
       </div>
       <p id="lock-error" class="error" hidden>Falsches Passwort</p>
@@ -32,97 +33,165 @@
 
   <!-- ============ App ============ -->
   <div id="app" class="app" hidden>
-    <header class="top">
-      <div class="brand">
-        <div class="orb sm" aria-hidden="true"></div>
-        <div class="brand-txt"><b>JARVIS</b><span id="state">Bereit</span></div>
-      </div>
-      <div class="seg" role="tablist" aria-label="Modus">
-        <button role="tab" data-view="write" aria-selected="true">Chat</button>
-        <button role="tab" data-view="speak" aria-selected="false">Sprechen</button>
-      </div>
-      <div class="tools">
-        <button id="btn-voice" class="ib only-write" aria-pressed="false" title="Antworten vorlesen" aria-label="Antworten vorlesen">
-          <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
-        </button>
-        <button class="ib" data-open="files" title="Dateien" aria-label="Dateien">
-          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-        </button>
-        <button class="ib" data-open="mail" title="E-Mail" aria-label="E-Mail">
-          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg><i id="mail-dot" class="dot"></i>
-        </button>
-        <button class="ib" data-action="new" title="Neues Gespräch" aria-label="Neues Gespräch">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-        </button>
-        <button class="ib" data-action="lock" id="btn-lock" title="Sperren" aria-label="Sperren">
-          <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-        </button>
-      </div>
-    </header>
+    <!-- Seitenleiste (Desktop) / Menü (Handy) -->
+    <nav id="nav" class="nav glass" aria-label="Bereiche">
+      <div class="nav-brand"><div class="reactor sm" aria-hidden="true"><i></i><i></i><i></i></div><b>JARVIS</b><small>OS</small></div>
+      <a href="#command" data-page="command"><span>◎</span>Command Center</a>
+      <a href="#chat" data-page="chat"><span>💬</span>AI Chat</a>
+      <a href="#agents" data-page="agents"><span>🤖</span>Agenten & Missionen</a>
+      <a href="#memory" data-page="memory"><span>🧠</span>Gedächtnis</a>
+      <a href="#projects" data-page="projects"><span>📁</span>Projekte & Aufgaben</a>
+      <a href="#automations" data-page="automations"><span>⚡</span>Automationen</a>
+      <a href="#browser" data-page="browser"><span>🌐</span>Browser</a>
+      <a href="#files" data-page="files"><span>🗂️</span>Dateien</a>
+      <a href="#knowledge" data-page="knowledge"><span>🕸️</span>Wissensnetz</a>
+      <a href="#models" data-page="models"><span>🧬</span>KI-Modelle</a>
+      <a href="#monitor" data-page="monitor"><span>📈</span>System Monitor</a>
+      <a href="#security" data-page="security"><span>🛡️</span>Security Center<i id="nav-approvals" class="pill warn" hidden></i></a>
+      <a href="#settings" data-page="settings"><span>⚙️</span>Einstellungen</a>
+    </nav>
+    <div id="nav-backdrop" class="backdrop" hidden></div>
 
-    <!-- Chat -->
-    <section id="view-write" class="view write">
-      <main id="log" class="log" aria-live="polite">
-        <div id="welcome" class="welcome">
-          <div class="orb lg" aria-hidden="true"></div>
-          <h2 id="hello">Wie kann ich helfen?</h2>
-          <div class="cards">
-            <button class="sug" data-q="Habe ich neue E-Mails?"><b>📬 Neue Mails</b><span>Posteingang prüfen</span></button>
-            <button class="sug" data-q="Erstelle mir eine Präsentation über "><b>📊 Präsentation</b><span>zu einem Thema erstellen</span></button>
-            <button class="sug" data-q="Male mir ein Bild von "><b>🎨 Bild malen</b><span>mit KI</span></button>
-            <button class="sug" data-attach="1"><b>📷 Foto senden</b><span>JARVIS schaut es an</span></button>
+    <div class="main">
+      <header class="top glass">
+        <button class="ib menu-btn" id="menu-btn" aria-label="Menü">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="top-title"><b id="page-title">Command Center</b><span id="state" class="state">Bereit</span></div>
+        <div class="tools">
+          <button class="ib" id="btn-search" title="Suche (Strg+K)" aria-label="Suche">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          </button>
+          <button id="btn-voice" class="ib" aria-pressed="false" title="Antworten vorlesen" aria-label="Antworten vorlesen">
+            <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
+          </button>
+          <button class="ib" id="btn-bell" title="Benachrichtigungen" aria-label="Benachrichtigungen">
+            <svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><i id="bell-count" class="count" hidden></i>
+          </button>
+          <button class="ib" data-action="lock" id="btn-lock" title="Sperren" aria-label="Sperren">
+            <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- ===== Command Center ===== -->
+      <section class="page" id="page-command" data-title="Command Center">
+        <div id="cc-approvals" class="banner warn" hidden></div>
+        <div id="cc-grid" class="hud-grid"></div>
+      </section>
+
+      <!-- ===== AI Chat ===== -->
+      <section class="page chat-page" id="page-chat" data-title="AI Chat" hidden>
+        <div class="chat-head">
+          <div class="seg" role="tablist" aria-label="Modus">
+            <button role="tab" data-view="write" aria-selected="true">Schreiben</button>
+            <button role="tab" data-view="speak" aria-selected="false">Sprechen</button>
+          </div>
+          <label class="agent-pick">Agent
+            <select id="agent-select" aria-label="Agent wählen"><option value="auto">Automatisch</option></select>
+          </label>
+          <button class="btn sm" data-action="new">＋ Neu</button>
+        </div>
+
+        <div id="view-write" class="view write">
+          <main id="log" class="log" aria-live="polite">
+            <div id="welcome" class="welcome">
+              <div class="reactor md" aria-hidden="true"><i></i><i></i><i></i></div>
+              <h2 id="hello">Wie kann ich helfen?</h2>
+              <div class="cards">
+                <button class="sug" data-q="Plane meinen Tag morgen"><b>📅 Tag planen</b><span>Aufgaben, Konflikte, Zeitplan</span></button>
+                <button class="sug" data-q="Habe ich neue E-Mails?"><b>📬 Neue Mails</b><span>Posteingang prüfen</span></button>
+                <button class="sug" data-q="Erstelle mir eine Präsentation über "><b>📊 Präsentation</b><span>zu einem Thema</span></button>
+                <button class="sug" data-attach="1"><b>📷 Foto senden</b><span>JARVIS schaut es an</span></button>
+              </div>
+            </div>
+          </main>
+          <footer class="bar">
+            <div id="interim" class="interim"></div>
+            <div id="strip" class="strip" hidden></div>
+            <form id="composer" class="composer glass" autocomplete="off">
+              <button type="button" id="attach" class="cb" aria-label="Datei oder Foto anhängen" title="Anhängen">
+                <svg viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg>
+              </button>
+              <input type="file" id="file" multiple hidden
+                accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.json,.html,.xml,.py,.js,.css,.ics,.vcf">
+              <textarea id="input" rows="1" placeholder="Befehl an JARVIS …" aria-label="Nachricht"></textarea>
+              <button type="button" id="mic" class="cb" aria-label="Diktieren" title="Diktieren">
+                <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              </button>
+              <button type="button" id="stop" class="cb" aria-label="Antwort abbrechen" title="Abbrechen" hidden>
+                <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+              </button>
+              <button type="submit" id="send" class="send" aria-label="Senden">
+                <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+              </button>
+            </form>
+          </footer>
+        </div>
+
+        <div id="view-speak" class="view speak" hidden>
+          <button id="sp-orb" class="sp-orb" aria-label="Sprechen starten oder stoppen"><canvas aria-hidden="true"></canvas></button>
+          <div id="sp-state" class="sp-state">Tippe auf den Kern und sprich</div>
+          <div class="sp-talk" aria-live="polite">
+            <p id="sp-user" class="sp-user"></p>
+            <p id="sp-answer" class="sp-answer"></p>
+            <div id="sp-extra" class="sp-extra"></div>
+          </div>
+          <div class="sp-controls">
+            <label class="switch"><input type="checkbox" id="sp-auto" checked><span>Dauergespräch</span></label>
+            <button id="sp-test" class="btn sm">🔊 Stimme testen</button>
+            <button id="sp-stop" class="btn sm">Stopp</button>
           </div>
         </div>
-      </main>
-      <footer class="bar">
-        <div id="interim" class="interim"></div>
-        <div id="strip" class="strip" hidden></div>
-        <form id="composer" class="composer" autocomplete="off">
-          <button type="button" id="attach" class="cb" aria-label="Datei oder Foto anhängen" title="Anhängen">
-            <svg viewBox="0 0 24 24"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg>
-          </button>
-          <input type="file" id="file" multiple hidden
-            accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.csv,.md,.json,.html,.xml,.py,.js,.css,.ics,.vcf">
-          <textarea id="input" rows="1" placeholder="Nachricht an JARVIS" aria-label="Nachricht"></textarea>
-          <button type="button" id="mic" class="cb" aria-label="Diktieren" title="Diktieren">
-            <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
-          </button>
-          <button type="submit" id="send" class="send" aria-label="Senden">
-            <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-          </button>
-        </form>
-        <p class="hint">JARVIS kann Fehler machen. Wichtiges bitte prüfen.</p>
-      </footer>
-    </section>
+      </section>
 
-    <!-- Sprechen -->
-    <section id="view-speak" class="view speak" hidden>
-      <button id="sp-orb" class="sp-orb" aria-label="Sprechen starten oder stoppen"><canvas aria-hidden="true"></canvas></button>
-      <div id="sp-state" class="sp-state">Tippe auf den Kreis und sprich</div>
-      <div class="sp-talk" aria-live="polite">
-        <p id="sp-user" class="sp-user"></p>
-        <p id="sp-answer" class="sp-answer"></p>
-        <div id="sp-extra" class="sp-extra"></div>
-      </div>
-      <div class="sp-controls">
-        <label class="switch"><input type="checkbox" id="sp-auto" checked><span>Weiter zuhören</span></label>
-        <button id="sp-test" class="btn">🔊 Stimme testen</button>
-        <button id="sp-stop" class="btn">Stopp</button>
-      </div>
-    </section>
+      <!-- ===== weitere Seiten (Inhalt aus pages.js, nur echte Daten) ===== -->
+      <section class="page" id="page-agents" data-title="Agenten & Missionen" hidden></section>
+      <section class="page" id="page-memory" data-title="Gedächtnis" hidden></section>
+      <section class="page" id="page-projects" data-title="Projekte & Aufgaben" hidden></section>
+      <section class="page" id="page-automations" data-title="Automation Center" hidden></section>
+      <section class="page" id="page-browser" data-title="Browser" hidden></section>
+      <section class="page" id="page-files" data-title="Dateien" hidden></section>
+      <section class="page" id="page-knowledge" data-title="Wissensnetz" hidden></section>
+      <section class="page" id="page-models" data-title="KI-Modelle" hidden></section>
+      <section class="page" id="page-monitor" data-title="System Monitor" hidden></section>
+      <section class="page" id="page-security" data-title="Security Center" hidden></section>
+      <section class="page" id="page-settings" data-title="Einstellungen" hidden></section>
+
+      <!-- Untere Leiste (Handy) -->
+      <nav class="tabbar glass" aria-label="Schnellzugriff">
+        <a href="#command" data-page="command"><span>◎</span>Zentrale</a>
+        <a href="#chat" data-page="chat"><span>💬</span>Chat</a>
+        <button class="talk-btn" data-action="talk" aria-label="Sprechen"><div class="reactor sm" aria-hidden="true"><i></i><i></i><i></i></div></button>
+        <a href="#agents" data-page="agents"><span>🤖</span>Agenten</a>
+        <button data-action="menu"><span>☰</span>Mehr</button>
+      </nav>
+    </div>
   </div>
 
   <!-- Dialoge -->
   <dialog id="mail-dialog" class="sheet">
-    <div class="sheet-head"><h3>E-Mail</h3><button class="ib" id="mail-close" aria-label="Schließen">✕</button></div>
+    <div class="sheet-head"><h3>E-Mail</h3><button class="ib" data-close aria-label="Schließen">✕</button></div>
     <div id="mail-body"></div>
   </dialog>
-  <dialog id="files-dialog" class="sheet">
-    <div class="sheet-head"><h3>Dateien</h3><button class="ib" id="files-close" aria-label="Schließen">✕</button></div>
-    <ul id="files-list" class="files"></ul>
-    <div class="row end"><button id="files-clear" class="btn danger" hidden>Alle löschen</button></div>
+  <dialog id="search-dialog" class="sheet search">
+    <div class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="search-input" placeholder="Alles durchsuchen: Gedächtnis, Aufgaben, Dateien, Chats …" aria-label="Suche">
+      <button class="ib" data-close aria-label="Schließen">✕</button></div>
+    <ul id="search-results" class="results"></ul>
   </dialog>
+  <dialog id="bell-dialog" class="sheet">
+    <div class="sheet-head"><h3>Benachrichtigungen</h3><div><button class="btn sm" id="bell-read">Alle gelesen</button>
+      <button class="ib" data-close aria-label="Schließen">✕</button></div></div>
+    <ul id="bell-list" class="list"></ul>
+  </dialog>
+  <dialog id="modal" class="sheet">
+    <div class="sheet-head"><h3 id="modal-title"></h3><button class="ib" data-close aria-label="Schließen">✕</button></div>
+    <div id="modal-body"></div>
+  </dialog>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
 
   <script src="app.js"></script>
+  <script src="pages.js"></script>
 </body>
 </html>

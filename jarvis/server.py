@@ -50,7 +50,13 @@ def core():
         if _core is None:
             from .core import JarvisCore
 
-            _core = JarvisCore(cfg, DB())
+            try:
+                db = DB()
+            except Exception as e:  # noqa: BLE001 - z. B. falsche DATABASE_URL: lieber lokal weiterlaufen
+                log.exception("Datenbank nicht erreichbar – nutze lokale SQLite-Datei")
+                db = DB(url="sqlite:///" + str(Path(os.getenv("JARVIS_DATA_DIR") or Path.home() / ".jarvis") / "jarvis.db"))
+                db.error = f"DATABASE_URL funktioniert nicht ({type(e).__name__}) – Daten nur bis Neustart"
+            _core = JarvisCore(cfg, db)
             _core.mailbox_provider = _background_mailbox
         return _core
 

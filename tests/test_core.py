@@ -1,6 +1,7 @@
 """Tests für Kern: Gedächtnis, Aufgaben, Freigaben, Missionen, Automatisierungen, Routing und die Command-Center-API."""
 
 import json
+import os
 import time
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace as NS
@@ -64,7 +65,15 @@ def jc(tmp_path):
     cfg.output_dir = tmp_path / "out"
     cfg.output_dir.mkdir()
     cfg.groq_api_key, cfg.groq_model = "gsk_fake", None
-    db = DB(fallback_dir=tmp_path / "db")
+    pg = os.getenv("JARVIS_TEST_PG")   # optional: dieselben Tests gegen echtes Postgres (wie Neon)
+    if pg:
+        from jarvis.db import md
+
+        db = DB(url=pg)
+        md.drop_all(db.engine)
+        md.create_all(db.engine)
+    else:
+        db = DB(fallback_dir=tmp_path / "db")
     llm = ScriptLLM()
     c = JarvisCore(cfg, db, Registry(cfg, db, {"groq": llm}))
     c.llm = llm
