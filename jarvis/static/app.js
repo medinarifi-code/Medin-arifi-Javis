@@ -716,7 +716,7 @@
     $("#btn-voice").setAttribute("aria-pressed", store.get("jarvis-voice", "0") === "1" ? "true" : "false");
     $("#sp-auto").checked = store.get("jarvis-auto", "1") === "1";
     setMode(mode, false);
-    if (!info.ai_ready && !log.querySelector(".msg")) jarvisBubble("Mir fehlt noch der kostenlose GROQ_API_KEY (console.groq.com). Bitte bei Render unter Environment eintragen.", "error");
+    if (!info.ai_ready && !log.querySelector(".msg")) jarvisBubble("Mir fehlt noch ein kostenloser API-Key (GROQ_API_KEY oder OPENROUTER_API_KEY). Bitte bei Render unter Environment eintragen.", "error");
     await loadMail();
     if (mailState.pending) startPolling();
   }

@@ -1,8 +1,8 @@
-"""Das Gehirn von JARVIS: Groq (kostenlos) mit Werkzeugen und Streaming.
+"""Das Gehirn von JARVIS: Groq + OpenRouter (beides kostenlos) mit Werkzeugen und Streaming.
 
-Zuverlässigkeit: Jede Frage probiert bei Problemen der Reihe nach mehrere Groq-Modelle
-(Rate-Limit, zu große Anfrage, Modell weg, kaputter Werkzeug-Aufruf, Netzwerkfehler) und
-zuletzt eine Antwort ohne Werkzeuge. Erst wenn wirklich nichts geht, kommt eine freundliche Meldung.
+Zuverlässigkeit: Jede Frage probiert bei Problemen der Reihe nach mehrere Modelle – erst Groq,
+dann die kostenlosen OpenRouter-Modelle (Rate-Limit, zu große Anfrage, Modell weg, kaputter
+Werkzeug-Aufruf, Netzwerkfehler, falscher Key) und zuletzt eine Antwort ohne Werkzeuge.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ import time
 from typing import Callable
 
 import groq
+import httpx
+import openai
 from groq import Groq
 
 from .config import Config
@@ -36,15 +38,26 @@ DEFAULT_MODELS = [
 SEARCH_MODELS = ["groq/compound-mini", "groq/compound"]
 VISION_MODELS = ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"]
 VISION_HINTS = ("llama-4", "vision", "-vl", "qwen3.6", "qwen-vl")
+OPENROUTER_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODELS = [
+    "deepseek/deepseek-chat-v3-0324:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-235b-a22b:free",
+    "mistralai/mistral-small-3.2-24b-instruct:free",
+]
+OPENROUTER_VISION = ["meta-llama/llama-4-maverick:free", "qwen/qwen2.5-vl-72b-instruct:free"]
+MAX_OPENROUTER = 4
+API_ERRORS = (groq.APIError, openai.APIError)
+KEY_NAMES = {"groq": "GROQ_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 MAX_STEPS = 15        # Werkzeug-Runden pro Frage
-MAX_ATTEMPTS = 14     # Anfragen an Groq pro Frage (inkl. Wiederholungen)
+MAX_ATTEMPTS = 18     # Anfragen pro Frage (inkl. Wiederholungen)
 HISTORY_LIMIT = 12    # Nachrichten, die mitgeschickt werden
 TOOL_RESULT_KEEP = 1200  # so lang bleiben alte Werkzeug-Ergebnisse im Verlauf
 BUSY_TEXT = "Ich bin gerade etwas überlastet. Bitte versuch es in einer Minute nochmal."
 
 
 def short_error(message: str, limit: int = 160) -> str:
-    text = re.sub(r"gsk_[\w-]+", "***", str(message or ""))
+    text = re.sub(r"(gsk_|sk-or-)[\w-]+", "***", str(message or ""))
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit] + ("…" if len(text) > limit else "")
 
@@ -57,26 +70,93 @@ class _NoAnswer(Exception):
     """Kein Modell hat eine Antwort geliefert."""
 
 
+# ---------------------------------------------------------------------------- OpenRouter-Katalog
+_catalog: dict = {"time": 0.0, "text": None, "vision": None}
+
+
+def _fetch_openrouter_catalog() -> list[dict]:
+    """Öffentliche Modell-Liste von OpenRouter (kein Key nötig)."""
+    r = httpx.get(f"{OPENROUTER_URL}/models", timeout=10)
+    r.raise_for_status()
+    return r.json().get("data", [])
+
+
+def openrouter_models(vision: bool = False, override: list[str] | None = None) -> list[str]:
+    """Kostenlose OpenRouter-Modelle mit Werkzeug-Unterstützung (1 h zwischengespeichert)."""
+    if override and not vision:
+        return list(override)
+    key = "vision" if vision else "text"
+    if _catalog[key] is not None and time.time() - _catalog["time"] < 3600:
+        return _catalog[key]
+    preferred = OPENROUTER_VISION if vision else OPENROUTER_MODELS
+    try:
+        data = _fetch_openrouter_catalog()
+        free = [m for m in data if str(m.get("id", "")).endswith(":free")
+                and "tools" in (m.get("supported_parameters") or [])]
+        if vision:
+            free = [m for m in free if "image" in ((m.get("architecture") or {}).get("input_modalities") or [])]
+        ids = [m["id"] for m in free]
+        found = [m for m in preferred if m in ids] + [m for m in ids if m not in preferred]
+        result = found[:MAX_OPENROUTER] or preferred
+    except Exception as e:  # noqa: BLE001 - dann eben die Standardliste
+        log.info("OpenRouter-Modellliste nicht abrufbar: %s", e)
+        result = preferred
+    _catalog[key] = result
+    _catalog["time"] = time.time()
+    return result
+
+
+def _kind(e: Exception) -> str:
+    """Fehlerart unabhängig davon, ob der Fehler aus dem Groq- oder OpenAI-SDK kommt."""
+    name, status = type(e).__name__, getattr(e, "status_code", None)
+    if name in ("AuthenticationError", "PermissionDeniedError") or status in (401, 402, 403):
+        return "auth"
+    if name in ("APIConnectionError", "APITimeoutError", "InternalServerError") or (status or 0) >= 500:
+        return "net"
+    if name == "RateLimitError" or status == 429:
+        return "rate"
+    return "other"
+
+
 class Jarvis:
     """Ein Gespräch (eine Browser-Sitzung)."""
 
-    def __init__(self, cfg: Config, client: Groq | None = None):
+    def __init__(self, cfg: Config, client=None, router=None):
         self.cfg = cfg
-        self.client = client or Groq(api_key=cfg.groq_api_key or "missing", max_retries=0, timeout=60)
+        self.clients: dict = {}
+        if client is not None or cfg.groq_api_key:
+            self.clients["groq"] = client or Groq(api_key=cfg.groq_api_key, max_retries=0, timeout=60)
+        if router is not None or cfg.openrouter_api_key:
+            self.clients["openrouter"] = router or openai.OpenAI(
+                base_url=OPENROUTER_URL, api_key=cfg.openrouter_api_key, max_retries=0, timeout=60,
+                default_headers={"X-Title": "JARVIS"})
         preferred = [cfg.groq_model] if cfg.groq_model else []
         self.models = preferred + [m for m in DEFAULT_MODELS if m not in preferred]
+        self._auth_failed: dict[str, Exception] = {}
         self.history: list[dict] = []
         self.known_addresses: set[str] = set()
         self.tools_ok = True
         self.vision_models: list[str] | None = None
         self.vision = False  # aktuelle Frage enthält Bilder
 
-    def _candidates(self) -> list[str]:
-        if self.vision:
-            if self.vision_models is None:
-                self.vision_models = self._find_vision_models()
-            return self.vision_models
-        return self.models
+    @property
+    def client(self):
+        """Groq-Client (für Websuche/Vision-Liste)."""
+        return self.clients.get("groq")
+
+    def _candidates(self, skip: set[str] = frozenset()) -> list[tuple[str, str]]:
+        """(Anbieter, Modell) in Reihenfolge: erst Groq, dann kostenlose OpenRouter-Modelle."""
+        out: list[tuple[str, str]] = []
+        if "groq" in self.clients and "groq" not in skip:
+            if self.vision:
+                if self.vision_models is None:
+                    self.vision_models = self._find_vision_models()
+                out += [("groq", m) for m in self.vision_models]
+            else:
+                out += [("groq", m) for m in self.models]
+        if "openrouter" in self.clients and "openrouter" not in skip:
+            out += [("openrouter", m) for m in openrouter_models(self.vision, self.cfg.openrouter_models)]
+        return out
 
     def _find_vision_models(self) -> list[str]:
         wanted = [m for m in [os.getenv("GROQ_VISION_MODEL")] if m] + VISION_MODELS
@@ -94,9 +174,11 @@ class Jarvis:
 
     # ------------------------------------------------------------------ öffentlich
     def ask(self, text: str, on_text: OnText, on_status: OnStatus, on_event=None, mailbox=None, uploads=None) -> None:
-        if not self.cfg.groq_api_key:
-            on_text("Mir fehlt noch der kostenlose GROQ_API_KEY. Bitte bei Render unter Environment eintragen.")
+        if not self.clients:
+            on_text("Mir fehlt noch ein kostenloser API-Key (GROQ_API_KEY oder OPENROUTER_API_KEY). "
+                    "Bitte bei Render unter Environment eintragen.")
             return
+        self._auth_failed = {}
         uploads = uploads or []
         ctx = ToolContext(output_dir=self.cfg.output_dir, mailbox=mailbox, user_message=text,
                           known_addresses=self.known_addresses, on_event=on_event)
@@ -114,8 +196,8 @@ class Jarvis:
         except _NoAnswer:
             del self.history[checkpoint:]
             on_text(BUSY_TEXT)
-        except groq.APIError as e:
-            log.error("Groq-Fehler: %s", short_error(str(e), 500))
+        except API_ERRORS as e:
+            log.error("KI-Fehler: %s", short_error(str(e), 500))
             del self.history[checkpoint:]
             on_text(self._explain(e))
         except Exception as e:  # noqa: BLE001
@@ -159,25 +241,25 @@ class Jarvis:
         }} for t in tool_definitions(ctx.mailbox is not None)]
 
     # ------------------------------------------------------------------ Fehler
-    @staticmethod
-    def _explain(e: groq.APIError) -> str:
-        if isinstance(e, groq.AuthenticationError):
-            return "Mein GROQ_API_KEY wird abgelehnt. Bitte den Key bei Render prüfen (er beginnt mit gsk_)."
-        if isinstance(e, groq.PermissionDeniedError):
-            return "Groq verweigert gerade den Zugriff. Bitte prüfe dein Groq-Konto auf console.groq.com."
-        if isinstance(e, groq.APIConnectionError):
-            return "Ich kann die Groq-Server gerade nicht erreichen. Bitte versuch es gleich nochmal."
+    def _explain(self, e: Exception) -> str:
+        failed = [p for p in self.clients if p in self._auth_failed]
+        if failed and len(failed) == len(self.clients):
+            names = " und ".join(KEY_NAMES[p] for p in failed)
+            verb = "werden" if len(failed) > 1 else "wird"
+            return f"Mein {names} {verb} abgelehnt. Bitte den Key bei Render unter Environment prüfen."
+        if type(e).__name__ in ("APIConnectionError", "APITimeoutError"):
+            return "Ich kann die KI-Server gerade nicht erreichen. Bitte versuch es gleich nochmal."
         return BUSY_TEXT
 
     @staticmethod
-    def _retry_after(e: groq.APIError) -> float | None:
+    def _retry_after(e: Exception) -> float | None:
         try:
             value = e.response.headers.get("retry-after")  # type: ignore[union-attr]
             return float(value) if value is not None else None
         except (AttributeError, TypeError, ValueError):
             return None
 
-    def _next_model(self, state: dict, cands: list[str], reason: str) -> None:
+    def _next_model(self, state: dict, cands: list, reason: str) -> None:
         if state["idx"] + 1 < len(cands):
             log.warning("Modell %s: %s – versuche %s", cands[state["idx"]], reason, cands[state["idx"] + 1])
             state.update(idx=state["idx"] + 1, net=0, waited429=False, tool_retry=False)
@@ -197,14 +279,25 @@ class Jarvis:
                 self.history[:] = self.history[i:]
                 return
 
-    def _recover(self, e: groq.APIError, state: dict, cands: list[str]) -> None:
+    def _recover(self, e: Exception, state: dict, cands: list) -> None:
         """Passt die Einstellungen an, damit der nächste Versuch klappt – oder wirft _GiveUp."""
-        if isinstance(e, (groq.AuthenticationError, groq.PermissionDeniedError)):
-            raise _GiveUp
+        kind = _kind(e)
         low = str(getattr(e, "message", "") or e).lower()
         status = getattr(e, "status_code", None)
+        provider = cands[min(state["idx"], len(cands) - 1)][0]
 
-        if isinstance(e, (groq.APIConnectionError, groq.InternalServerError)) or (status or 0) >= 500:
+        if kind == "auth":
+            # Key dieses Anbieters geht nicht → Anbieter für diese Frage überspringen
+            self._auth_failed[provider] = e
+            before = sum(1 for c in cands[:state["idx"]] if c[0] != provider)
+            state["skip"].add(provider)
+            remaining = self._candidates(state["skip"])
+            if not remaining:
+                raise _GiveUp
+            log.warning("%s abgelehnt (%s) – nutze anderen Anbieter", KEY_NAMES[provider], status)
+            state.update(idx=min(before, len(remaining) - 1), net=0, waited429=False, tool_retry=False)
+            return
+        if kind == "net":
             if state["net"] < 2:
                 state["net"] += 1
                 time.sleep(1.5 * state["net"])
@@ -216,7 +309,7 @@ class Jarvis:
                 self._trim_to_question()
                 return
             return self._next_model(state, cands, "Anfrage zu groß")
-        if isinstance(e, groq.RateLimitError) or status == 429:
+        if kind == "rate":
             wait = self._retry_after(e)
             if wait is not None and wait <= 8 and not state["waited429"]:
                 state["waited429"] = True
@@ -232,14 +325,15 @@ class Jarvis:
         return self._next_model(state, cands, f"Fehler {status}")
 
     # ------------------------------------------------------------------ Schleife
-    def _turn(self, ctx: ToolContext, on_text: OnText, model: str, state: dict) -> tuple[str, list[dict]]:
+    def _turn(self, ctx: ToolContext, on_text: OnText, cand: tuple[str, str], state: dict) -> tuple[str, list[dict]]:
         """Eine Anfrage, live gestreamt. Rückgabe: (Text, Werkzeug-Aufrufe)."""
+        provider, model = cand
         kwargs = {"model": model, "messages": self._messages(ctx), "stream": True, "temperature": 0.6}
         tools = self._tools(ctx)
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
         text, calls = "", {}
-        for chunk in self.client.chat.completions.create(**kwargs):
+        for chunk in self.clients[provider].chat.completions.create(**kwargs):
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -258,17 +352,20 @@ class Jarvis:
         return text, [calls[i] for i in sorted(calls)]
 
     def _run(self, ctx: ToolContext, on_text: OnText, on_status: OnStatus) -> None:
-        state = {"idx": 0, "net": 0, "waited429": False, "tool_retry": False, "trimmed": False, "emitted": False}
+        state = {"idx": 0, "net": 0, "waited429": False, "tool_retry": False, "trimmed": False, "emitted": False,
+                 "skip": set()}
         steps = attempts = 0
         while steps < MAX_STEPS:
-            cands = self._candidates()
-            model = cands[min(state["idx"], len(cands) - 1)]
+            cands = self._candidates(state["skip"])
+            if not cands:
+                raise _NoAnswer
+            cand = cands[min(state["idx"], len(cands) - 1)]
             attempts += 1
             state["emitted"] = False
             try:
-                text, calls = self._turn(ctx, on_text, model, state)
-            except groq.APIError as e:
-                log.info("Groq-Fehler mit %s: %s", model, short_error(str(e), 300))
+                text, calls = self._turn(ctx, on_text, cand, state)
+            except API_ERRORS as e:
+                log.info("Fehler mit %s/%s: %s", cand[0], cand[1], short_error(str(e), 300))
                 if state["emitted"] or attempts >= MAX_ATTEMPTS:
                     raise  # schon Text ausgegeben → nicht doppelt antworten
                 try:
@@ -322,13 +419,16 @@ class Jarvis:
             return f"Fehler: {type(e).__name__}: {e}"
 
     def _search(self, query: str) -> str:
+        if self.client is None:
+            return ("Fehler: Die Internetsuche braucht den kostenlosen GROQ_API_KEY. Antworte aus deinem Wissen "
+                    "und sage, dass es nicht ganz aktuell sein könnte.")
         prompt = f"Suche im Internet und fasse die wichtigsten aktuellen Fakten kurz auf Deutsch zusammen: {query}"
         last = None
         for model in SEARCH_MODELS:
             try:
                 res = self.client.chat.completions.create(model=model, messages=[{"role": "user", "content": prompt}])
                 return res.choices[0].message.content or "Keine Ergebnisse gefunden."
-            except groq.APIError as e:
+            except API_ERRORS as e:
                 last = e
                 log.warning("Websuche mit %s fehlgeschlagen: %s", model, short_error(str(e), 300))
         return ("Fehler: Die Internetsuche ist gerade nicht verfügbar "

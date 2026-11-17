@@ -15,6 +15,12 @@ Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit der KI 
 2. Links auf **„API Keys“** → **„Create API Key“** → Name `jarvis` → **Submit**
 3. Key sofort kopieren (beginnt mit `gsk_…`, wird nur einmal angezeigt)
 
+### Optional: OpenRouter als Ersatz (kostenlos)
+Ist Groq überlastet, antwortet JARVIS automatisch mit einem kostenlosen Modell von OpenRouter (z. B. DeepSeek, Llama, Qwen).
+1. <https://openrouter.ai/keys> → **Create Key** → Key kopieren (beginnt mit `sk-or-…`)
+2. Bei Render → **Environment** → `OPENROUTER_API_KEY` eintragen
+Gratis-Limit von OpenRouter: ca. 50 Anfragen pro Tag (mehr mit etwas Guthaben). Internetsuche und Spracherkennung laufen weiter über Groq.
+
 ## 2. Online stellen bei Render (kostenlos)
 1. <https://render.com> → **„Get Started“** → mit **GitHub** anmelden
 2. **„+ New“** → **„Blueprint“** → Repository **Medin-arifi-Javis** auswählen
@@ -22,6 +28,7 @@ Ein persönlicher Assistent wie bei Iron Man, **komplett kostenlos** mit der KI 
    | Feld | Inhalt |
    |---|---|
    | `GROQ_API_KEY` | dein Key aus Schritt 1 |
+   | `OPENROUTER_API_KEY` | optional, siehe oben |
    | `JARVIS_WEB_PASSWORD` | ein Passwort, das du dir ausdenkst (schützt JARVIS und deine Mails) |
    | `JARVIS_USER_NAME` | wie JARVIS dich nennt, z. B. `Medin` |
    | `MS_CLIENT_ID` | für Outlook, siehe 3A (sonst leer lassen) |

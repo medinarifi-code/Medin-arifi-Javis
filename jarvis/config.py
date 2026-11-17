@@ -23,6 +23,8 @@ def _default_output_dir() -> Path:
 class Config:
     groq_api_key: str | None
     groq_model: str | None
+    openrouter_api_key: str | None
+    openrouter_models: list[str]
     web_password: str
     user_name: str
     output_dir: Path
@@ -33,6 +35,10 @@ class Config:
     mail_password: str | None
     mail_imap_host: str | None
     mail_smtp_host: str | None
+
+    @property
+    def ai_ready(self) -> bool:
+        return bool(self.groq_api_key or self.openrouter_api_key)
 
     @property
     def outlook_enabled(self) -> bool:
@@ -50,6 +56,8 @@ def load_config() -> Config:
     return Config(
         groq_api_key=env("GROQ_API_KEY"),
         groq_model=env("GROQ_MODEL"),
+        openrouter_api_key=env("OPENROUTER_API_KEY"),
+        openrouter_models=[m.strip() for m in (env("OPENROUTER_MODELS") or "").split(",") if m.strip()],
         web_password=env("JARVIS_WEB_PASSWORD") or "",
         user_name=env("JARVIS_USER_NAME") or "Sir",
         output_dir=output_dir,

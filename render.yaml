@@ -16,6 +16,9 @@ services:
       # Pflicht: kostenloser Key von https://console.groq.com/keys
       - key: GROQ_API_KEY
         sync: false
+      # Optional, kostenlos: OpenRouter-Key (openrouter.ai/keys) – springt ein, wenn Groq überlastet ist
+      - key: OPENROUTER_API_KEY
+        sync: false
       # Pflicht: dein Passwort für JARVIS (schützt auch deine Mails)
       - key: JARVIS_WEB_PASSWORD
         sync: false
