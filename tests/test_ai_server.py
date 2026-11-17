@@ -188,12 +188,13 @@ def client(monkeypatch, tmp_path, password="pw123"):
     monkeypatch.setattr(server.cfg, "mail_address", None)
     monkeypatch.setattr(server.cfg, "ms_client_id", None)
 
-    def fake_ask(self, text, on_text, on_status, on_event=None, mailbox=None, uploads=None):
+    def fake_ask(self, text, on_text, on_status, on_event=None, mailbox=None, uploads=None, agent=None):
         on_text("Antwort: " + text + "".join(f" [{u.kind}:{u.path}]" for u in uploads or []))
         (tmp_path / "f.txt").write_text("x")
         on_event({"type": "file", "name": "f.txt", "url": "/files/f.txt"})
 
     monkeypatch.setattr(Jarvis, "ask", fake_ask)
+    monkeypatch.setattr(server, "_extract_memory", lambda q, a: None)
     server._sessions.clear()
     return TestClient(server.app)
 
@@ -206,7 +207,7 @@ def test_server_login_and_chat(monkeypatch, tmp_path):
     assert c.post("/api/chat", json={"session": "abcdefgh1", "text": "Hi"}).status_code == 401
     r = c.post("/api/chat", json={"session": "abcdefgh1", "text": "Hi"}, headers={"X-Jarvis-Key": "pw123"})
     evs = [json.loads(l) for l in r.text.splitlines() if l]
-    assert [e["type"] for e in evs] == ["text", "file", "done"]
+    assert [e["type"] for e in evs] == ["agent", "text", "file", "done"]
     assert c.get("/files/f.txt").status_code == 401
     assert c.get("/files/f.txt?key=pw123").text == "x"
     assert c.get("/files/%2e%2e/%2e%2e/etc/passwd?key=pw123").status_code == 404
@@ -291,10 +292,10 @@ def test_document_text_in_prompt(tmp_path):
 def test_chat_endpoint_with_attachment(monkeypatch, tmp_path):
     c = client(monkeypatch, tmp_path, password="")
     r = c.post("/api/chat", json={"session": "abcdefgh3", "text": "", "attachments": [{"name": "a.png", "type": "image/png", "data": _png_data_url()}]})
-    evs = [json.loads(l) for l in r.text.splitlines() if l]
+    evs = [json.loads(l) for l in r.text.splitlines() if l and json.loads(l)["type"] != "agent"]
     assert "Was siehst du" in evs[0]["text"] and "[image:uploads/a.jpg]" in evs[0]["text"]
     r = c.post("/api/chat", json={"session": "abcdefgh3", "text": "x", "attachments": [{"name": "virus.exe", "data": "data:application/octet-stream;base64,AAAA"}]})
-    evs = [json.loads(l) for l in r.text.splitlines() if l]
+    evs = [json.loads(l) for l in r.text.splitlines() if l and json.loads(l)["type"] != "agent"]
     assert evs[0]["type"] == "error" and "nicht unterstützt" in evs[0]["text"]
 
 

@@ -15,6 +15,16 @@ from collections import OrderedDict
 log = logging.getLogger("jarvis.tts")
 
 DEFAULT_VOICE = "de-DE-ConradNeural"   # tiefe, ruhige Männerstimme
+VOICES = {   # wählbare Stimmen (Microsoft Neural, kostenlos)
+    "de-DE-ConradNeural": "Conrad – tief, ruhig (Standard)",
+    "de-DE-KillianNeural": "Killian – jung, klar",
+    "de-DE-FlorianMultilingualNeural": "Florian – natürlich",
+    "de-DE-KatjaNeural": "Katja – weiblich, klar",
+    "de-DE-SeraphinaMultilingualNeural": "Seraphina – weiblich, warm",
+    "de-AT-JonasNeural": "Jonas – österreichisch",
+    "de-CH-JanNeural": "Jan – schweizerisch",
+    "en-GB-RyanNeural": "Ryan – britisch (Englisch)",
+}
 MAX_CHARS = 600
 CACHE_SIZE = 64
 TIMEOUT = 15
@@ -58,23 +68,25 @@ class Speech:
         self.primary = _edge
         self.backup = _gtts
 
-    async def synth(self, text: str) -> bytes:
+    async def synth(self, text: str, voice: str | None = None) -> bytes:
         text = " ".join(text.split())[:MAX_CHARS]
         if not text:
             raise SpeechError("kein Text")
-        if text in self.cache:
-            self.cache.move_to_end(text)
-            return self.cache[text]
+        voice = voice if voice in VOICES else self.voice
+        key = f"{voice}|{text}"
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
         try:
-            audio = await asyncio.wait_for(self.primary(text, self.voice), TIMEOUT)
+            audio = await asyncio.wait_for(self.primary(text, voice), TIMEOUT)
         except Exception as e:  # noqa: BLE001 - dann eben die Ersatz-Stimme
             log.warning("Microsoft-Stimme nicht verfügbar (%s) – nehme Google-Stimme", e)
             try:
-                audio = await asyncio.wait_for(asyncio.to_thread(self.backup, text, self.lang), TIMEOUT)
+                audio = await asyncio.wait_for(asyncio.to_thread(self.backup, text, voice.split("-")[0]), TIMEOUT)
             except Exception as e2:  # noqa: BLE001
                 log.error("Keine Stimme verfügbar: %s", e2)
                 raise SpeechError(str(e2)) from e2
-        self.cache[text] = audio
+        self.cache[key] = audio
         while len(self.cache) > CACHE_SIZE:
             self.cache.popitem(last=False)
         return audio

@@ -20,8 +20,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .ai import Jarvis
+from sqlalchemy import desc, select, update
+
+from .agents import AGENTS, route
+from .ai import Cancelled, Jarvis
 from .config import load_config
+from .db import DB, feedback as feedback_t, messages as messages_t, missions as missions_t, now
 from .mail import MailError
 
 log = logging.getLogger("jarvis")
@@ -34,6 +38,46 @@ app = FastAPI(title="J.A.R.V.I.S.", docs_url=None, redoc_url=None)
 
 _imap_box = None
 _imap_key = None
+_core = None
+_core_lock = threading.Lock()
+_last_mailbox = None
+
+
+def core():
+    """Der JARVIS-Kern (Datenbank, Agenten, Gedächtnis, Automatisierungen) – wird beim ersten Zugriff erstellt."""
+    global _core
+    with _core_lock:
+        if _core is None:
+            from .core import JarvisCore
+
+            _core = JarvisCore(cfg, DB())
+            _core.mailbox_provider = _background_mailbox
+        return _core
+
+
+def _background_mailbox():
+    """Postfach für Hintergrund-Aufgaben: zuletzt im Chat genutztes Postfach oder das IMAP-Postfach."""
+    box = _last_mailbox
+    if box is not None and getattr(getattr(box, "auth", None), "connected", True):
+        return box
+    try:
+        return imap_mailbox()
+    except MailError:
+        return None
+
+
+@app.on_event("startup")
+def _startup():
+    c = core()
+    try:
+        c.restore_files()
+    except Exception:  # noqa: BLE001
+        log.exception("Dateien konnten nicht wiederhergestellt werden")
+    # Missionen, die durch einen Neustart unterbrochen wurden, ehrlich als abgebrochen markieren
+    c.db.run(update(missions_t).where(missions_t.c.status.in_(["planning", "running", "waiting", "paused"]))
+             .values(status="failed", result="Durch Server-Neustart unterbrochen.", updated=now()))
+    if not os.getenv("JARVIS_NO_SCHEDULER"):
+        c.automations.start()
 
 
 def imap_mailbox():
@@ -51,7 +95,7 @@ def imap_mailbox():
 
 
 # --------------------------------------------------------------------------- Passwortschutz
-PUBLIC = {"/api/info", "/api/login"}
+PUBLIC = {"/api/info", "/api/login", "/api/cron"}
 
 
 def _password_ok(given: str) -> bool:
@@ -72,7 +116,8 @@ async def check_password(request: Request, call_next):
 # --------------------------------------------------------------------------- Sitzungen
 class Session:
     def __init__(self):
-        self.jarvis = Jarvis(cfg)
+        c = core()
+        self.jarvis = Jarvis(cfg, registry=c.registry, core=c)
         self.outlook = None
         self.lock = threading.Lock()
 
@@ -118,6 +163,7 @@ class Attachment(BaseModel):
 
 class ChatBody(SessionBody):
     text: str = Field(default="", max_length=20000)
+    agent: str = Field(default="auto", max_length=20)
     attachments: list[Attachment] = Field(default_factory=list, max_length=4)
 
 
@@ -180,18 +226,45 @@ def chat(body: ChatBody, request: Request):
             if not text:
                 events.put({"type": "error", "text": "Bitte eine Nachricht eingeben."})
                 return
+            c = core()
+            for u in uploads:
+                c.persist_file(cfg.output_dir / u.path)
             try:
                 mailbox = session.mailbox()
             except MailError as e:
                 mailbox = None
                 events.put({"type": "status", "text": f"E-Mail nicht verfügbar: {e}"})
-            session.jarvis.ask(text,
-                               on_text=lambda t: events.put({"type": "text", "text": t}),
-                               on_status=lambda s: events.put({"type": "status", "text": s}),
-                               on_event=events.put, mailbox=mailbox, uploads=uploads)
+            if mailbox is not None:
+                global _last_mailbox
+                _last_mailbox = mailbox
+            agent = body.agent if body.agent in AGENTS else route(text)
+            events.put({"type": "agent", "id": agent, "name": AGENTS[agent]["name"], "icon": AGENTS[agent]["icon"]})
+            answer: list[str] = []
+
+            def on_text(t):
+                answer.append(t)
+                events.put({"type": "text", "text": t})
+
+            _save_message(body.session, "user", text + "".join(f"\n[Anhang: {u.name}]" for u in uploads))
+            from .api_core import _active_chats
+
+            _active_chats[body.session] = {"agent": agent, "text": text, "since": time.time()}
+            try:
+                session.jarvis.ask(text, on_text=on_text, on_status=lambda s: events.put({"type": "status", "text": s}),
+                                   on_event=events.put, mailbox=mailbox, uploads=uploads, agent=agent)
+            finally:
+                _active_chats.pop(body.session, None)
+            reply = "".join(answer)
+            _save_message(body.session, "assistant", reply)
+            if session.jarvis.last_route:
+                events.put({"type": "route", **session.jarvis.last_route})
+            if reply and c.security.allowed("auto_memory"):
+                threading.Thread(target=_extract_memory, args=(text, reply), daemon=True).start()
             auth = session.outlook
             if auth is not None and auth.connected and auth.changed():
                 events.put({"type": "mail_token", "token": auth.export()})
+        except Cancelled:
+            events.put({"type": "status", "text": "Abgebrochen."})
         except Exception as e:  # noqa: BLE001
             log.exception("Chat-Fehler")
             events.put({"type": "error", "text": f"Interner Fehler: {type(e).__name__}"})
@@ -210,6 +283,55 @@ def chat(body: ChatBody, request: Request):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+def _save_message(session_id: str, role: str, content: str) -> None:
+    if not content:
+        return
+    try:
+        core().db.add(messages_t, session=session_id, ts=now(), role=role, content=content[:20000])
+    except Exception as e:  # noqa: BLE001
+        log.info("Nachricht nicht gespeichert: %s", e)
+
+
+def _extract_memory(question: str, answer: str) -> None:
+    c = core()
+    saved = c.memory.extract(c.registry, question, answer)
+    for m in saved:
+        c.db.event(f"Gedächtnis {'aktualisiert' if m['state'] == 'updated' else 'neu'}: {m['title'][:80]}",
+                   kind="ok", agent="Memory Agent")
+
+
+@app.post("/api/chat/stop")
+def chat_stop(body: SessionBody):
+    """Bricht die laufende Antwort einer Sitzung ab (wirkt beim nächsten Zwischenschritt)."""
+    s = get_session(body.session)
+    s.jarvis.should_stop = lambda: True
+
+    def reset():
+        time.sleep(3)
+        s.jarvis.should_stop = lambda: False
+
+    threading.Thread(target=reset, daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/history")
+def history(session: str, limit: int = 60):
+    rows = core().db.q(select(messages_t).where(messages_t.c.session == session).order_by(desc(messages_t.c.id)).limit(limit))
+    return list(reversed(rows))
+
+
+class FeedbackBody(BaseModel):
+    rating: int = Field(ge=-1, le=1)
+    question: str = Field(default="", max_length=20000)
+    answer: str = Field(default="", max_length=40000)
+
+
+@app.post("/api/feedback")
+def give_feedback(body: FeedbackBody):
+    core().db.add(feedback_t, ts=now(), rating=body.rating, question=body.question, answer=body.answer)
+    return {"ok": True}
+
+
 # --------------------------------------------------------------------------- Sprache
 from .tts import STT_MAX_BYTES, Speech, SpeechError, transcribe  # noqa: E402
 
@@ -218,12 +340,12 @@ _stt_client = None
 
 
 @app.get("/api/tts")
-async def tts(text: str = ""):
+async def tts(text: str = "", voice: str = ""):
     """Text → MP3 (natürliche Stimme). Der Browser spielt das mit einem <audio>-Element ab."""
     if not text.strip():
         raise HTTPException(400, "Kein Text")
     try:
-        audio = await speech.synth(text)
+        audio = await speech.synth(text, voice or None)
     except SpeechError as e:
         raise HTTPException(503, "Stimme gerade nicht verfügbar") from e
     return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
@@ -325,14 +447,15 @@ def outlook_disconnect(body: SessionBody):
 
 # --------------------------------------------------------------------------- Dashboard-Daten
 @app.get("/api/files")
-def list_files():
+def list_files(limit: int = 40):
     """Zuletzt erstellte/hochgeladene Dateien (für das Dashboard)."""
     root = cfg.output_dir.resolve()
     files = sorted((p for p in root.rglob("*") if p.is_file() and not p.name.endswith(".office.png")),
                    key=lambda p: p.stat().st_mtime, reverse=True)
     return [{"name": p.name, "path": p.relative_to(root).as_posix(), "url": f"/files/{p.relative_to(root).as_posix()}",
              "size": p.stat().st_size, "time": int(p.stat().st_mtime),
-             "upload": p.relative_to(root).parts[0] == "uploads"} for p in files[:40]]
+             "upload": p.relative_to(root).parts[0] == "uploads",
+             "folder": p.parent.relative_to(root).as_posix() if p.parent != root else ""} for p in files[:limit]]
 
 
 @app.delete("/api/files")
@@ -344,7 +467,10 @@ def delete_file(path: str):
         target = existing_path(cfg.output_dir, path)
     except ToolError as e:
         raise HTTPException(404, str(e)) from e
+    rel_path = target.relative_to(cfg.output_dir.resolve()).as_posix()
     target.unlink()
+    core().db.delete_file(rel_path)
+    core().db.event(f"Datei gelöscht: {rel_path}", kind="security", agent="Du")
     log.info("Datei gelöscht: %s", path)
     return {"ok": True}
 
@@ -355,10 +481,12 @@ def delete_all_files():
     count = 0
     for p in sorted(root.rglob("*"), reverse=True):  # erst Dateien, dann leere Ordner
         if p.is_file():
+            core().db.delete_file(p.relative_to(root).as_posix())
             p.unlink()
             count += 1
         elif p.is_dir() and not any(p.iterdir()):
             p.rmdir()
+    core().db.event(f"Alle Dateien gelöscht ({count})", kind="security", agent="Du")
     log.info("%s Dateien gelöscht", count)
     return {"ok": True, "deleted": count}
 
@@ -386,9 +514,14 @@ def _ram_percent() -> float | None:
 def system():
     """Echte Auslastung des Servers (CPU-Last, Arbeitsspeicher, Speicherplatz)."""
     disk = shutil.disk_usage(cfg.output_dir)
+    c = core()
     return {"cpu": _cpu_percent(), "ram": _ram_percent(), "disk": round(100 * disk.used / disk.total, 1),
-            "uptime": int(time.time() - START_TIME), "sessions": len(_sessions)}
+            "uptime": int(time.time() - START_TIME), "sessions": len(_sessions),
+            "db": {"kind": c.db.kind, "persistent": c.db.persistent, "files_mb": round(c.db.used_bytes() / 1048576, 1)},
+            "threads": threading.active_count()}
 
+
+from . import api_core  # noqa: E402,F401  (registriert die Kern-Endpunkte)
 
 # --------------------------------------------------------------------------- Dateien
 @app.get("/files/{rel_path:path}")

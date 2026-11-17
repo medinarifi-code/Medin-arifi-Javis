@@ -6,6 +6,7 @@ import openai
 import pytest
 
 from jarvis import ai
+from jarvis import providers as prov
 from jarvis.ai import Jarvis
 from jarvis.config import load_config
 
@@ -41,8 +42,8 @@ class Fake:
 @pytest.fixture(autouse=True)
 def setup(monkeypatch):
     monkeypatch.setattr("jarvis.ai.time.sleep", lambda s: None)
-    ai._catalog.update(time=0.0, text=None, vision=None)
-    monkeypatch.setattr(ai, "_fetch_openrouter_catalog", lambda: [
+    prov._catalog.update(time=0.0, text=None, vision=None)
+    monkeypatch.setattr(prov, "_fetch_openrouter_catalog", lambda: [
         {"id": "deepseek/deepseek-chat-v3-0324:free", "supported_parameters": ["tools"], "architecture": {"input_modalities": ["text"]}},
         {"id": "some/paid-model", "supported_parameters": ["tools"]},
         {"id": "no/tools:free", "supported_parameters": []},
@@ -63,16 +64,16 @@ def make(tmp_path, groq_turns=None, router_turns=None, groq_key=True, router_key
 
 
 def test_catalog_only_free_models_with_tools():
-    assert ai.openrouter_models() == ["deepseek/deepseek-chat-v3-0324:free", "meta-llama/llama-4-maverick:free"]
-    assert ai.openrouter_models(vision=True) == ["meta-llama/llama-4-maverick:free"]
-    assert ai.openrouter_models(override=["a:free"]) == ["a:free"]
+    assert prov.openrouter_models() == ["deepseek/deepseek-chat-v3-0324:free", "meta-llama/llama-4-maverick:free"]
+    assert prov.openrouter_models(vision=True) == ["meta-llama/llama-4-maverick:free"]
+    assert prov.openrouter_models(override=["a:free"]) == ["a:free"]
 
 
 def test_catalog_fallback_on_error(monkeypatch):
     def broken():
         raise httpx.ConnectError("nope")
-    monkeypatch.setattr(ai, "_fetch_openrouter_catalog", broken)
-    assert ai.openrouter_models() == ai.OPENROUTER_MODELS
+    monkeypatch.setattr(prov, "_fetch_openrouter_catalog", broken)
+    assert prov.openrouter_models() == prov.OPENROUTER_PREFERRED
 
 
 def test_groq_rate_limited_everywhere_then_openrouter(tmp_path):

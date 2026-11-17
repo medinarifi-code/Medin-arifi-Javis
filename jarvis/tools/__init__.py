@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import files, mail, media, office
+from . import brain, files, mail, media, office
 from .files import ToolError, ToolResult
 
 S = {"type": "string"}
@@ -90,14 +90,28 @@ class ToolContext:
     known_addresses: set[str] = field(default_factory=set)
     sends: int = 0
     on_event: Callable[[dict], None] | None = None
+    core: Any = None              # JARVIS-Kern (Gedächtnis, Aufgaben, Missionen …) – None in einfachen Tests
+    agent: str = "master"
+    mission_id: int | None = None
 
     def emit(self, event: dict) -> None:
         if self.on_event:
             self.on_event(event)
 
+    def agent_label(self) -> str:
+        from ..agents import AGENTS
 
-def tool_definitions(mail_connected: bool) -> list[dict]:
-    return [*FILE_TOOLS, SEARCH_TOOL, *(MAIL_TOOLS if mail_connected else [])]
+        return AGENTS.get(self.agent, {}).get("name", self.agent)
+
+
+def tool_definitions(mail_connected: bool, allowed: list[str] | None = None, brain_tools: bool = False) -> list[dict]:
+    """Werkzeuge für die KI. allowed = Werkzeugliste eines Agenten ('mail' = alle Mail-Werkzeuge)."""
+    all_tools = [*FILE_TOOLS, SEARCH_TOOL, *(brain.BRAIN_TOOLS if brain_tools else []),
+                 *(MAIL_TOOLS if mail_connected else [])]
+    if allowed is None:
+        return all_tools
+    names = set(allowed) | ({t["name"] for t in MAIL_TOOLS} if "mail" in allowed else set())
+    return [t for t in all_tools if t["name"] in names]
 
 
 LABELS = {
@@ -108,11 +122,12 @@ LABELS = {
     "create_zip": "Packe ZIP", "read_file": "Lese Datei",
     "list_emails": "Prüfe Posteingang", "search_emails": "Durchsuche Mails", "read_email": "Lese Mail",
     "reply_email": "Sende Antwort", "send_email": "Sende Mail",
+    **brain.LABELS,
 }
 
 
 def describe(name: str, args: dict) -> str:
-    detail = args.get("filename") or args.get("path") or args.get("query") or args.get("to") or ""
+    detail = args.get("filename") or args.get("path") or args.get("query") or args.get("to") or args.get("title") or ""
     return f"{LABELS.get(name, name)} {detail}".strip()
 
 
@@ -176,17 +191,28 @@ def execute(name: str, args: dict, ctx: ToolContext) -> str:
     elif name == "read_email":
         _req(args, "id")
         result = mail.read_email(ctx, str(args["id"]))
+    elif name in ("reply_email", "send_email") and ctx.core is not None and not ctx.core.security.allowed("mail_send"):
+        raise ToolError("Mails senden ist im Security Center ausgeschaltet.")
     elif name == "reply_email":
         _req(args, "id", "text")
         result = mail.reply_email(ctx, str(args["id"]), str(args["text"]))
     elif name == "send_email":
         _req(args, "to", "subject", "text")
         result = mail.send_email(ctx, str(args["to"]), str(args["subject"]), str(args["text"]))
+    elif any(t["name"] == name for t in brain.BRAIN_TOOLS):
+        return brain.execute(name, args, ctx)
     else:
         raise ToolError(f"Unbekanntes Werkzeug: {name}")
 
+    if name in ("reply_email", "send_email") and ctx.core is not None:
+        ctx.core.db.event(f"Mail gesendet ({name})", kind="security", agent=ctx.agent_label(),
+                          detail=str(args.get("to") or args.get("id") or ""), mission_id=ctx.mission_id)
     if isinstance(result, ToolResult) and result.file is not None:
         rel = result.file.resolve().relative_to(out.resolve()).as_posix()
+        if ctx.core is not None:  # dauerhaft speichern (überlebt Server-Neustarts)
+            ctx.core.persist_file(result.file)
+            ctx.core.db.event(f"Datei erstellt: {result.file.name}", kind="ok", agent=ctx.agent_label(),
+                              mission_id=ctx.mission_id)
         ctx.emit({"type": "file", "name": result.file.name, "url": f"/files/{rel}"})
     return str(result)
 
