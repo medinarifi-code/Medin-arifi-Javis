@@ -4,8 +4,6 @@ Anbieter (Keys nur als Umgebungsvariablen auf dem Server – nie im Browser):
   groq        GROQ_API_KEY          kostenlos
   openrouter  OPENROUTER_API_KEY    kostenlose ":free"-Modelle
   gemini      GEMINI_API_KEY        kostenloses Kontingent (Google AI Studio)
-  openai      OPENAI_API_KEY        kostenpflichtig
-  anthropic   ANTHROPIC_API_KEY     kostenpflichtig (Claude, offizielles SDK)
   ollama      OLLAMA_URL            eigener Server (z. B. http://mein-pc:11434)
 
 Alle Anbieter liefern dieselbe Schnittstelle: client.chat.completions.create(**kwargs) mit
@@ -34,9 +32,6 @@ PROVIDERS: dict[str, dict] = {
                    "base": OPENROUTER_URL},
     "gemini": {"label": "Google Gemini", "env": "GEMINI_API_KEY", "free": True, "site": "aistudio.google.com",
                "base": "https://generativelanguage.googleapis.com/v1beta/openai/"},
-    "openai": {"label": "OpenAI", "env": "OPENAI_API_KEY", "free": False, "site": "platform.openai.com",
-               "base": "https://api.openai.com/v1"},
-    "anthropic": {"label": "Anthropic Claude", "env": "ANTHROPIC_API_KEY", "free": False, "site": "console.anthropic.com"},
     "ollama": {"label": "Ollama (eigener Server)", "env": "OLLAMA_URL", "free": True, "site": "ollama.com"},
 }
 
@@ -51,9 +46,6 @@ MODELS: dict[str, dict[str, list[str]]] = {
     "openrouter": {},   # wird aus dem Live-Katalog befüllt (nur kostenlose Modelle mit Werkzeugen)
     "gemini": {"fast": ["gemini-flash-lite-latest", "gemini-flash-latest"], "smart": ["gemini-flash-latest"],
                "code": ["gemini-flash-latest"], "vision": ["gemini-flash-latest"]},
-    "openai": {"fast": ["gpt-4o-mini"], "smart": ["gpt-4o"], "code": ["gpt-4o"], "vision": ["gpt-4o"]},
-    "anthropic": {"fast": ["claude-haiku-5-5"], "smart": ["claude-opus-5-5"], "code": ["claude-opus-5-5"],
-                  "vision": ["claude-opus-5-5"]},
     "ollama": {"fast": ["llama3.1"], "smart": ["llama3.1"], "code": ["qwen2.5-coder"], "vision": ["llava"]},
 }
 OPENROUTER_PREFERRED = ["deepseek/deepseek-chat-v3-0324:free", "meta-llama/llama-3.3-70b-instruct:free",
@@ -69,11 +61,11 @@ TIERS = {
 }
 # Standard-Reihenfolge der Anbieter je Stufe (kostenlose zuerst). In den Einstellungen änderbar.
 DEFAULT_ORDER = {
-    "fast": ["groq", "gemini", "openrouter", "openai", "anthropic", "ollama"],
-    "smart": ["groq", "gemini", "openrouter", "anthropic", "openai", "ollama"],
-    "code": ["groq", "anthropic", "openai", "gemini", "openrouter", "ollama"],
-    "research": ["groq", "gemini", "openrouter", "anthropic", "openai", "ollama"],
-    "vision": ["groq", "gemini", "openrouter", "anthropic", "openai", "ollama"],
+    "fast": ["groq", "gemini", "openrouter", "ollama"],
+    "smart": ["groq", "gemini", "openrouter", "ollama"],
+    "code": ["groq", "gemini", "openrouter", "ollama"],
+    "research": ["groq", "gemini", "openrouter", "ollama"],
+    "vision": ["groq", "gemini", "openrouter", "ollama"],
 }
 
 _catalog: dict = {"time": 0.0, "text": None, "vision": None}
@@ -127,89 +119,6 @@ def classify(text: str, has_images: bool = False) -> str:
     return "smart"
 
 
-# ---------------------------------------------------------------------------- Anthropic-Adapter
-class AnthropicChat:
-    """Stellt Claude (offizielles anthropic-SDK) mit OpenAI-artiger Stream-Schnittstelle bereit."""
-
-    def __init__(self, api_key: str):
-        import anthropic
-
-        self.client = anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=120)
-        self.chat = NS(completions=NS(create=self.create))
-
-    @staticmethod
-    def _convert(messages: list[dict]) -> tuple[str, list[dict]]:
-        system, out = "", []
-        for m in messages:
-            role = m.get("role")
-            if role == "system":
-                system += (m.get("content") or "") + "\n"
-                continue
-            if role == "tool":
-                block = {"type": "tool_result", "tool_use_id": m["tool_call_id"], "content": str(m.get("content") or "")}
-                if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list) \
-                        and out[-1]["content"] and out[-1]["content"][0].get("type") == "tool_result":
-                    out[-1]["content"].append(block)
-                else:
-                    out.append({"role": "user", "content": [block]})
-                continue
-            if role == "assistant":
-                if m.get("_anthropic"):  # Original-Blöcke (inkl. Thinking) unverändert zurückgeben
-                    out.append({"role": "assistant", "content": m["_anthropic"]})
-                    continue
-                blocks = [{"type": "text", "text": m["content"]}] if m.get("content") else []
-                for tc in m.get("tool_calls") or []:
-                    try:
-                        args = json.loads(tc["function"]["arguments"] or "{}")
-                    except ValueError:
-                        args = {}
-                    blocks.append({"type": "tool_use", "id": tc["id"], "name": tc["function"]["name"], "input": args})
-                out.append({"role": "assistant", "content": blocks or [{"type": "text", "text": "…"}]})
-                continue
-            content = m.get("content")
-            if isinstance(content, list):
-                blocks = []
-                for part in content:
-                    if part.get("type") == "text":
-                        blocks.append({"type": "text", "text": part["text"]})
-                    elif part.get("type") == "image_url":
-                        url = part["image_url"]["url"]
-                        media, _, data = url.partition(";base64,")
-                        blocks.append({"type": "image", "source": {"type": "base64", "media_type": media.replace("data:", ""),
-                                                                   "data": data}})
-                out.append({"role": "user", "content": blocks})
-            else:
-                out.append({"role": "user", "content": content or ""})
-        return system.strip(), out
-
-    def create(self, model: str, messages: list[dict], stream: bool = True, tools=None, tool_choice=None,
-               temperature=None, **_) -> Iterator:
-        system, msgs = self._convert(messages)
-        kwargs = {"model": model, "max_tokens": 16000, "messages": msgs,
-                  "betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
-        if system:
-            kwargs["system"] = system
-        if tools:
-            kwargs["tools"] = [{"name": t["function"]["name"], "description": t["function"]["description"],
-                                "input_schema": t["function"]["parameters"]} for t in tools]
-        return self._stream(kwargs)
-
-    def _stream(self, kwargs) -> Iterator:
-        with self.client.beta.messages.stream(**kwargs) as s:
-            for ev in s:
-                if getattr(ev, "type", "") == "text" and ev.text:
-                    yield NS(choices=[NS(delta=NS(content=ev.text, tool_calls=None))])
-            final = s.get_final_message()
-        if final.stop_reason == "refusal":
-            yield NS(choices=[NS(delta=NS(content="Dazu kann ich leider nichts sagen.", tool_calls=None))])
-        calls = [b for b in final.content if b.type == "tool_use"]
-        raw = [b.model_dump(exclude_none=True) for b in final.content]
-        tool_calls = [NS(index=i, id=b.id, function=NS(name=b.name, arguments=json.dumps(b.input)))
-                      for i, b in enumerate(calls)]
-        yield NS(choices=[NS(delta=NS(content=None, tool_calls=tool_calls or None))], raw_anthropic=raw)
-
-
-# ---------------------------------------------------------------------------- Registry
 class Registry:
     def __init__(self, cfg, db=None, overrides: dict | None = None):
         self.cfg = cfg
@@ -244,8 +153,6 @@ class Registry:
             from groq import Groq
 
             return Groq(api_key=key, max_retries=0, timeout=60)
-        if name == "anthropic":
-            return AnthropicChat(key)
         import openai
 
         if name == "ollama":
@@ -276,6 +183,7 @@ class Registry:
         saved = self.order_override.get(tier)
         if saved is None and self.db is not None:
             saved = (self.db.get_setting("model_order", {}) or {}).get(tier)
+        saved = [p for p in (saved or []) if p in PROVIDERS]   # entfernte Anbieter ausblenden
         return saved or DEFAULT_ORDER.get(tier, DEFAULT_ORDER["smart"])
 
     def candidates(self, tier: str, skip: set[str] = frozenset()) -> list[tuple[str, str]]:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import os
 import random
 import urllib.parse
 import zipfile
@@ -156,14 +155,10 @@ def create_image(output_dir: Path, prompt: str, filename: str = "", width: int =
     width = max(256, min(int(width or 1024), 1536))
     height = max(256, min(int(height or 1024), 1536))
     params = {"width": width, "height": height, "nologo": "true", "model": "flux", "seed": random.randint(1, 10**9)}
-    headers = {}
-    token = os.getenv("POLLINATIONS_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
     url = "https://image.pollinations.ai/prompt/" + urllib.parse.quote(prompt[:900], safe="")
     try:
         with http_client_factory() as client:
-            r = client.get(url, params=params, headers=headers)
+            r = client.get(url, params=params)
     except httpx.HTTPError as e:
         raise ToolError(f"Der Bild-Dienst ist gerade nicht erreichbar ({type(e).__name__}). Bitte später erneut versuchen.") from e
     if r.status_code == 429:

@@ -12,7 +12,7 @@ und als App auf dem iPhone, kostenlos auf Render.
 - 📅 **Tagesplanung**: „Plane meinen Tag morgen“. JARVIS priorisiert, erkennt Überschneidungen, nutzt freie Zeitfenster und schlägt einen Zeitplan vor. **Eingetragen wird erst nach deiner Freigabe.** Danach kommen Erinnerungen.
 - 📁 **Project Brain**: Projekte mit Fortschritt, Entscheidungen, nächsten Schritten und erkannten Risiken (Engpässe, Überfälliges, Stillstand). Dazu ein KI-Statusbericht.
 - ⚡ **Automation Center**: No-Code-Baukasten aus Auslöser (täglich/wöchentlich/alle X Std/neue Mail/neue Datei) → Bedingung → Aktion mit Agent → Benachrichtigung. Mit Vorlagen, „Jetzt ausführen“ und Laufprotokoll.
-- 🧬 **Modellverwaltung**: Groq, OpenRouter, Gemini, OpenAI, Anthropic und Ollama mit echtem Status, Erfolgsquote, Antwortzeit, Tokens und Verbindungstest. Die Reihenfolge je Aufgabentyp (schnell/stark/Code/Recherche/Bilder) legst du selbst fest, bei Ausfall wechselt JARVIS automatisch.
+- 🧬 **Modellverwaltung**: Groq, OpenRouter, Gemini und Ollama mit echtem Status, Erfolgsquote, Antwortzeit, Tokens und Verbindungstest. Die Reihenfolge je Aufgabentyp (schnell/stark/Code/Recherche/Bilder) legst du selbst fest, bei Ausfall wechselt JARVIS automatisch.
 - ⚖️ **Second Opinion**: mehrere Modelle antworten unabhängig, JARVIS vergleicht sie und bildet eine geprüfte Antwort.
 - 🔁 **Self-Improvement**: JARVIS analysiert Fehler und 👎-Bewertungen und schlägt Regeln vor. Aktiv werden sie nur mit deiner Zustimmung, Sicherheitsregeln und eigener Code bleiben unangetastet.
 - 🛡️ **Security Center**: Freigaben, Berechtigungen, Sicherheitsprotokoll und Status der Schlüssel (nur ob gesetzt, nie der Wert).
@@ -47,7 +47,7 @@ Gratis-Limit von OpenRouter: ca. 50 Anfragen pro Tag (mehr mit etwas Guthaben). 
    | `MAIL_ADDRESS`, `MAIL_APP_PASSWORD` | für Gmail/GMX/iCloud, siehe 3B/3C (sonst leer lassen) |
    | `DATABASE_URL` | **empfohlen**: dauerhaftes Gedächtnis, siehe 4 |
    | `JARVIS_CRON_TOKEN` | optional: für pünktliche Automationen, siehe 5 |
-   | `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_URL` | optional: weitere KI-Anbieter, siehe 6 |
+   | `GEMINI_API_KEY`, `OLLAMA_URL` | optional: weitere KI-Anbieter, siehe 6 |
 4. **„Deploy Blueprint“** und 3–5 Minuten warten. Oben steht dann dein Link (`https://jarvis-….onrender.com`).
 5. **iPhone-App:** Link in Safari öffnen → Teilen □↑ → **„Zum Home-Bildschirm“**
 
@@ -113,8 +113,6 @@ Der Aufruf weckt JARVIS und führt fällige Automationen, Erinnerungen und proak
 | Variable | Anbieter | Kosten |
 |---|---|---|
 | `GEMINI_API_KEY` | Google Gemini (<https://aistudio.google.com>) | kostenlos mit Limits |
-| `OPENAI_API_KEY` | OpenAI | kostenpflichtig |
-| `ANTHROPIC_API_KEY` | Anthropic Claude | kostenpflichtig |
 | `OLLAMA_URL` | eigener Ollama-Server (z. B. `https://mein-server:11434`) | kostenlos, eigener Rechner |
 
 Unter **KI-Modelle** siehst du alle Anbieter mit echtem Status und kannst die Reihenfolge je Aufgabentyp ändern.
@@ -141,7 +139,7 @@ Unter **KI-Modelle** siehst du alle Anbieter mit echtem Status und kannst die Re
 - **Wake Word:** funktioniert nur, solange JARVIS geöffnet und im Vordergrund ist, und nur in Browsern mit Spracherkennung. Auf dem iPhone als Home-Bildschirm-App oft nicht. Dann die Sprechen-Taste nutzen.
 - **Kostenlose Limits:** Groq/OpenRouter/Gemini haben Tageslimits. JARVIS wechselt automatisch, sagt aber ehrlich Bescheid, wenn alle ausgeschöpft sind.
 - **Render gratis:** schläft nach 15 Min ein, der erste Aufruf dauert dann ca. 1 Minute (siehe 5 für Automationen).
-- KI-Bilder kommen kostenlos von Pollinations.ai (optional `POLLINATIONS_TOKEN`).
+- KI-Bilder kommen kostenlos von Pollinations.ai (ohne Konto, ca. 1 Bild pro 15 Sekunden).
 - Fehlerdetails: Render → jarvis → **Logs**.
 
 ## Auf dem eigenen PC (optional)

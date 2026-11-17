@@ -25,11 +25,6 @@ from .config import Config
 from .persona import system_prompt
 from .tools import ToolContext, ToolError, describe, execute, tool_definitions
 
-try:
-    import anthropic
-    _ANTHROPIC_ERRORS: tuple = (anthropic.APIError,)
-except ImportError:  # pragma: no cover
-    _ANTHROPIC_ERRORS = ()
 
 log = logging.getLogger("jarvis")
 
@@ -45,7 +40,7 @@ DEFAULT_MODELS = [
     "llama-3.1-8b-instant",
 ]
 SEARCH_MODELS = ["groq/compound-mini", "groq/compound"]
-API_ERRORS = (groq.APIError, openai.APIError, *_ANTHROPIC_ERRORS)
+API_ERRORS = (groq.APIError, openai.APIError)
 KEY_NAMES = {k: v["env"] for k, v in prov.PROVIDERS.items()}
 MAX_STEPS = 15
 MAX_ATTEMPTS = 18
@@ -219,8 +214,7 @@ class Jarvis:
         system = system_prompt(self.cfg, ctx.mailbox is not None)
         if getattr(self, "_context", ""):
             system += "\n\n" + self._context
-        if provider != "anthropic":
-            recent = [{k: v for k, v in m.items() if not k.startswith("_")} for m in recent]
+        recent = [{k: v for k, v in m.items() if not k.startswith("_")} for m in recent]
         return [{"role": "system", "content": system}, *recent]
 
     def _tools(self, ctx: ToolContext) -> list[dict] | None:
@@ -317,9 +311,7 @@ class Jarvis:
     def _turn(self, ctx: ToolContext, on_text: OnText, cand: tuple[str, str], state: dict) -> tuple[str, list[dict]]:
         provider, model = cand
         messages = self._messages(ctx, provider)
-        kwargs = {"model": model, "messages": messages, "stream": True}
-        if provider not in ("anthropic",):
-            kwargs["temperature"] = 0.6
+        kwargs = {"model": model, "messages": messages, "stream": True, "temperature": 0.6}
         tools = self._tools(ctx)
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
@@ -328,8 +320,6 @@ class Jarvis:
         t0 = time.time()
         try:
             for chunk in self.clients[provider].chat.completions.create(**kwargs):
-                if getattr(chunk, "raw_anthropic", None):
-                    state["raw"] = chunk.raw_anthropic
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
@@ -394,8 +384,6 @@ class Jarvis:
             msg = {"role": "assistant", "content": text or None, "tool_calls": [
                 {"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}}
                 for c in calls]}
-            if state.get("raw"):
-                msg["_anthropic"] = state["raw"]
             self.history.append(msg)
             for c in calls:
                 if self.should_stop():
