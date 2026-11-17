@@ -45,9 +45,7 @@ Gratis-Limit von OpenRouter: ca. 50 Anfragen pro Tag (mehr mit etwas Guthaben). 
    | `JARVIS_USER_NAME` | wie JARVIS dich nennt, z. B. `Medin` |
    | `MS_CLIENT_ID` | für Outlook, siehe 3A (sonst leer lassen) |
    | `MAIL_ADDRESS`, `MAIL_APP_PASSWORD` | für Gmail/GMX/iCloud, siehe 3B/3C (sonst leer lassen) |
-   | `DATABASE_URL` | **empfohlen**: dauerhaftes Gedächtnis, siehe 4 |
-   | `JARVIS_CRON_TOKEN` | optional: für pünktliche Automationen, siehe 5 |
-   | `GEMINI_API_KEY`, `OLLAMA_URL` | optional: weitere KI-Anbieter, siehe 6 |
+   | `GEMINI_API_KEY`, `OLLAMA_URL` | optional: weitere KI-Anbieter, siehe 4 |
 4. **„Deploy Blueprint“** und 3–5 Minuten warten. Oben steht dann dein Link (`https://jarvis-….onrender.com`).
 5. **iPhone-App:** Link in Safari öffnen → Teilen □↑ → **„Zum Home-Bildschirm“**
 
@@ -94,22 +92,7 @@ Andere Anbieter (Firmen-/Schuladressen usw.) erkennt JARVIS meist automatisch. K
 
 ---
 
-## 4. Dauerhaftes Gedächtnis mit Neon (kostenlos, empfohlen)
-Ohne Datenbank vergisst JARVIS bei jedem Neustart von Render alles (Gedächtnis, Aufgaben, Automationen, Dateien).
-1. <https://neon.tech> → **Sign up** (mit GitHub oder Google) → Projekt anlegen (Region: Frankfurt)
-2. Im Dashboard **„Connect“** → den **Connection string** kopieren (beginnt mit `postgresql://…`)
-3. Bei Render → **Environment** → `DATABASE_URL` = dieser String → speichern
-
-Danach speichert JARVIS alles dauerhaft, auch erstellte und hochgeladene Dateien (bis 15 MB pro Datei). Nach einem Neustart werden sie automatisch wiederhergestellt. Im Command Center unter **System Status** steht dann „Neon/Postgres – dauerhaft“.
-
-## 5. Pünktliche Automationen (externer Wecker, kostenlos)
-Render (gratis) schläft nach 15 Minuten ohne Besuch ein. Dann können Automationen und Erinnerungen nicht laufen. Lösung:
-1. Bei Render `JARVIS_CRON_TOKEN` setzen, z. B. eine lange Zufallszeichenfolge
-2. Auf <https://cron-job.org> (kostenlos) einen Job anlegen: URL `https://DEIN-LINK.onrender.com/api/cron?token=DEIN_TOKEN`, alle 10 Minuten
-
-Der Aufruf weckt JARVIS und führt fällige Automationen, Erinnerungen und proaktive Hinweise aus.
-
-## 6. Weitere KI-Anbieter (optional)
+## 4. Weitere KI-Anbieter (optional)
 | Variable | Anbieter | Kosten |
 |---|---|---|
 | `GEMINI_API_KEY` | Google Gemini (<https://aistudio.google.com>) | kostenlos mit Limits |
@@ -138,20 +121,21 @@ Unter **KI-Modelle** siehst du alle Anbieter mit echtem Status und kannst die Re
 - **Browser-Agent:** liest Webseiten. Klicken, Einloggen oder Formulare ausfüllen kann er nicht.
 - **Wake Word:** funktioniert nur, solange JARVIS geöffnet und im Vordergrund ist, und nur in Browsern mit Spracherkennung. Auf dem iPhone als Home-Bildschirm-App oft nicht. Dann die Sprechen-Taste nutzen.
 - **Kostenlose Limits:** Groq/OpenRouter/Gemini haben Tageslimits. JARVIS wechselt automatisch, sagt aber ehrlich Bescheid, wenn alle ausgeschöpft sind.
-- **Render gratis:** schläft nach 15 Min ein, der erste Aufruf dauert dann ca. 1 Minute (siehe 5 für Automationen).
+- **Render gratis:** schläft nach 15 Min ohne Besuch ein, der erste Aufruf dauert dann ca. 1 Minute. Automationen und Erinnerungen laufen nur, solange JARVIS wach ist.
+- **Speicher:** Bei jedem Neustart von Render (z. B. nach dem Einschlafen oder einem Update) sind Gedächtnis, Aufgaben, Automationen und Dateien wieder leer.
 - KI-Bilder kommen kostenlos von Pollinations.ai (ohne Konto, ca. 1 Bild pro 15 Sekunden).
 - Fehlerdetails: Render → jarvis → **Logs**.
 
 ## Auf dem eigenen PC (optional)
-`start.bat` doppelklicken (Windows), Keys in `.env` eintragen → <http://localhost:8000>. Ohne `DATABASE_URL` nutzt JARVIS eine lokale SQLite-Datei (`~/.jarvis/jarvis.db`).
+`start.bat` doppelklicken (Windows), Keys in `.env` eintragen → <http://localhost:8000>. Daten liegen in `~/.jarvis/jarvis.db`.
 
 ## Für Entwickler
 | Datei | Aufgabe |
 |---|---|
 | `jarvis/server.py` | FastAPI: Login, Chat-Stream (NDJSON), Stimme, Mail, Dateien |
-| `jarvis/api_core.py` | API des Command Centers (Dashboard, Agenten, Gedächtnis, Aufgaben, Missionen, Freigaben, Automationen, Modelle, Suche, Einstellungen, `/api/cron`) |
+| `jarvis/api_core.py` | API des Command Centers (Dashboard, Agenten, Gedächtnis, Aufgaben, Missionen, Freigaben, Automationen, Modelle, Suche, Einstellungen) |
 | `jarvis/core.py` | Kern: verbindet alles; Second Opinion, Self-Improvement, proaktive Hinweise, Project Brain |
-| `jarvis/db.py` | Datenbank (Neon-Postgres oder SQLite) mit allen Tabellen, Datei-Sicherung |
+| `jarvis/db.py` | Datenbank (SQLite) mit allen Tabellen |
 | `jarvis/providers.py` | KI-Anbieter, automatische Modellwahl, Nutzungsstatistik |
 | `jarvis/ai.py` | Gesprächsschleife mit Werkzeugen und robustem Failover |
 | `jarvis/agents.py` | Agenten-Profile und Routing |

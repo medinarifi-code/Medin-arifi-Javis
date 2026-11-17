@@ -315,7 +315,7 @@ def test_api_permissions_and_missions(api):
     assert len(sim["steps"]) == 2 and "nichts ausgeführt" in sim["note"]
 
 
-def test_api_automations_models_cron(api, monkeypatch):
+def test_api_automations_models(api, monkeypatch):
     body = {"name": "Test", "trigger": {"type": "manual"}, "action": {"type": "notify", "text": "Hallo"}}
     aid = api.post("/api/automations", json=body).json()["id"]
     assert api.post(f"/api/automations/{aid}/run").json()["status"] == "ok"
@@ -324,10 +324,7 @@ def test_api_automations_models_cron(api, monkeypatch):
     assert api.put("/api/models/order", json={"tier": "fast", "order": ["openrouter", "groq"]}).json()["ok"]
     assert api.get("/api/models").json()["order"]["fast"][0] == "openrouter"
     assert api.put("/api/models/order", json={"tier": "fast", "order": ["evil"]}).status_code == 400
-    assert api.get("/api/cron").status_code == 404
-    monkeypatch.setenv("JARVIS_CRON_TOKEN", "geheim")
-    assert api.get("/api/cron?token=falsch").status_code == 401
-    assert "ran" in api.get("/api/cron?token=geheim").json()
+    assert api.get("/api/cron").status_code in (401, 404, 405)   # Wecker-Endpunkt gibt es nicht mehr
     n = api.get("/api/notifications").json()
     assert n["unread"] >= 1
     api.post("/api/notifications/read", json={"ids": []})

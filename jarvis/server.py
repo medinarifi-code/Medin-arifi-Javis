@@ -101,7 +101,7 @@ def imap_mailbox():
 
 
 # --------------------------------------------------------------------------- Passwortschutz
-PUBLIC = {"/api/info", "/api/login", "/api/cron"}
+PUBLIC = {"/api/info", "/api/login"}
 
 
 def _password_ok(given: str) -> bool:

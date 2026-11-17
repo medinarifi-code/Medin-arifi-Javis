@@ -4,8 +4,6 @@ Automatisierungen, Modelle, Benachrichtigungen, Suche, Einstellungen. Alle Werte
 from __future__ import annotations
 
 import asyncio
-import os
-import secrets
 import time
 from datetime import datetime
 
@@ -380,7 +378,6 @@ class AutomationBody(BaseModel):
 def automation_list():
     c = core()
     return {"items": c.automations.list(), "runs": c.automations.runs(None, 40), "scheduler": c.automations.alive(),
-            "cron": bool(os.getenv("JARVIS_CRON_TOKEN")),
             "meta": {"triggers": auto.TRIGGERS, "conditions": auto.CONDITIONS, "actions": auto.ACTIONS,
                      "templates": auto.TEMPLATES, "agents": {k: v["name"] for k, v in AGENTS.items()}}}
 
@@ -421,18 +418,6 @@ async def automation_run(aid: int):
 @app.get("/api/automations/{aid}/runs")
 def automation_runs(aid: int):
     return core().automations.runs(aid, 50)
-
-
-@app.api_route("/api/cron", methods=["GET", "POST"])
-async def cron(token: str = ""):
-    """Für einen externen Wecker (z. B. cron-job.org), weil Render (kostenlos) sonst einschläft."""
-    expected = os.getenv("JARVIS_CRON_TOKEN") or ""
-    if not expected:
-        raise HTTPException(404, "JARVIS_CRON_TOKEN ist nicht gesetzt")
-    if not secrets.compare_digest(token.encode(), expected.encode()):
-        await asyncio.sleep(1.5)
-        raise HTTPException(401, "Falscher Token")
-    return await asyncio.to_thread(core().automations.tick)
 
 
 # --------------------------------------------------------------------------- Modelle

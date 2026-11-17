@@ -1,7 +1,6 @@
 """Automation Center: Trigger → Bedingung → Aktion (mit Agent) → Benachrichtigung, plus Laufprotokoll.
 
-Der Scheduler läuft im Server (alle 60 s). Weil Render (kostenlos) nach 15 Minuten ohne Aufruf einschläft,
-gibt es zusätzlich /api/cron?token=… für einen externen kostenlosen Wecker (z. B. cron-job.org).
+Der Scheduler läuft im Server (alle 60 s), solange der Server wach ist.
 """
 
 from __future__ import annotations

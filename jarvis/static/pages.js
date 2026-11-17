@@ -533,7 +533,7 @@
       const names = Object.fromEntries(d.items.map((a) => [a.id, a.name]));
       el.innerHTML = `<div class="section-title"><h2>Automation Center</h2><button class="btn primary sm" id="au-new">＋ Neue Automation</button></div>
         <div class="banner ${d.scheduler ? "info" : "warn"}"><span><i class="dot ${d.scheduler ? "on" : "off"}"></i> Zeitplaner ${d.scheduler ? "läuft (prüft jede Minute)" : "läuft nicht"}.
-        Render (kostenlos) schläft nach 15 Min ohne Besuch ein – ${d.cron ? "✓ externer Wecker ist eingerichtet (JARVIS_CRON_TOKEN)." : "für pünktliche Automationen einen kostenlosen Wecker einrichten (siehe README: JARVIS_CRON_TOKEN + cron-job.org)."}</span></div>
+        Hinweis: Render (kostenlos) schläft nach 15 Min ohne Besuch ein – dann laufen Automationen erst beim nächsten Öffnen.</span></div>
         <div class="panel" style="margin-bottom:14px"><h3>Vorlagen</h3><div class="qc">${d.meta.templates.map((t, i) => `<button data-tpl="${i}">＋ ${esc(t.name)}</button>`).join("")}</div></div>
         <div class="panel" style="margin-bottom:14px"><h3>Deine Automationen</h3><ul class="list" id="au-list"></ul></div>
         <div class="panel"><h3>Laufprotokoll</h3><div class="scroll-x"><table class="t"><thead><tr><th>Zeit</th><th>Automation</th><th>Status</th><th>Dauer</th><th>Ergebnis</th></tr></thead><tbody>
@@ -775,7 +775,7 @@
         <div class="panel w6"><h3>Schutz & Schlüssel</h3>
           <div class="kv"><span>Passwortschutz</span><b class="${d.password ? "ok" : "error"}">${d.password ? "aktiv" : "AUS – JARVIS_WEB_PASSWORD setzen!"}</b></div>
           <div class="kv"><span>Automatische Sperre</span><b>nach 5 Min im Hintergrund</b></div>
-          <div class="kv"><span>Datenbank</span><b class="${d.database.persistent ? "ok" : "warn-t"}">${esc(d.database.kind)} · ${d.database.persistent ? "dauerhaft" : "nicht dauerhaft (DATABASE_URL fehlt)"}</b></div>
+          <div class="kv"><span>Datenbank</span><b class="${d.database.persistent ? "ok" : "warn-t"}">${esc(d.database.kind)} · ${d.database.persistent ? "dauerhaft" : "nicht dauerhaft (leer nach Neustart)"}</b></div>
           ${Object.entries(d.keys).map(([k, v]) => `<div class="kv"><span><code>${esc(k)}</code></span><b class="${v ? "ok" : "muted"}">${v ? "gesetzt (nur auf dem Server)" : "nicht gesetzt"}</b></div>`).join("")}
           <p class="muted" style="font-size:12.5px">API-Keys liegen nur in den Render-Umgebungsvariablen – nie im Browser oder auf GitHub.</p></div>
         <div class="panel w6"><h3>Freigabe-Verlauf</h3><ul class="feed">${d.approvals.filter((a) => a.status !== "pending").map((a) => `<li><time>${fmtTime(a.ts)}</time><i class="k ${a.status === "done" ? "ok" : a.status === "denied" ? "warn" : "err"}"></i><span>${esc(a.summary.split("\n")[0])} <small>${esc(STATUS_DE[a.status] || a.status)}${a.agent ? " · " + esc(a.agent) : ""}${a.result ? " · " + esc(a.result.slice(0, 120)) : ""}</small></span></li>`).join("") || '<li class="empty">Noch nichts.</li>'}</ul></div>
